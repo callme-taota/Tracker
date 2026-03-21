@@ -1,0 +1,36 @@
+# Default pipeline: RSS -> clean -> summary -> interest -> telegram
+# Copy to config.yaml and set OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (or set in config) to enable full flow.
+name: default
+
+stages:
+  - name: rss_source
+    plugin_type: source
+    plugin_id: rss
+    config:
+      feeds:
+        - https://www.theverge.com/rss/index.xml
+
+  - name: content_clean
+    plugin_type: processor
+    plugin_id: clean
+    config: {}
+
+  - name: ai_summary
+    plugin_type: summary
+    plugin_id: openai_summary
+    config:
+      model: gpt-3.5-turbo
+
+  - name: interest_filter
+    plugin_type: interest
+    plugin_id: keyword_interest
+    config:
+      keywords:
+        - AI
+        - tech
+        - open source
+
+  - name: telegram_dispatch
+    plugin_type: dispatch
+    plugin_id: telegram
+    config: {}

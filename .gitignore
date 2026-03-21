@@ -1,0 +1,10 @@
+/tracker
+*.exe
+*.test
+*.out
+config.yaml
+tracker.db
+tracker.db-*
+web/node_modules
+web/dist
+.idea

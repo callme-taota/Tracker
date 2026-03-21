@@ -1,0 +1,16 @@
+# Single-replica default. For horizontal scale see docs/DEPLOYMENT.md (shared SQLite is not recommended).
+services:
+  tracker:
+    build: .
+    image: tracker:local
+    ports:
+      - "8080:8080"
+    environment:
+      TRACKER_DB_PATH: /data/tracker.db
+      TRACKER_INSTANCE_ID: ${TRACKER_INSTANCE_ID:-compose-1}
+    volumes:
+      - tracker_data:/data
+    restart: unless-stopped
+
+volumes:
+  tracker_data:

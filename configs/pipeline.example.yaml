@@ -1,0 +1,50 @@
+# 管道配置示例：支持多数据源与多推送渠道
+# 数据源可选: rss (自定义 feeds) / news (主流新闻预设: global, cn)
+# 推送可选: telegram / feishu / discord（可同时配置多个 dispatch stage 或复制多份）
+
+name: default
+
+stages:
+  - name: news_source
+    plugin_type: source
+    plugin_id: news
+    config:
+      presets:
+        - global
+        - cn
+      # extra_feeds: []
+
+  - name: content_clean
+    plugin_type: processor
+    plugin_id: clean
+    config: {}
+
+  - name: ai_summary
+    plugin_type: summary
+    plugin_id: openai_summary
+    config:
+      model: gpt-3.5-turbo
+
+  - name: interest_filter
+    plugin_type: interest
+    plugin_id: keyword_interest
+    config:
+      keywords:
+        - AI
+        - tech
+        - open source
+
+  - name: telegram_dispatch
+    plugin_type: dispatch
+    plugin_id: telegram
+    config: {}
+
+  - name: feishu_dispatch
+    plugin_type: dispatch
+    plugin_id: feishu
+    config: {}
+
+  - name: discord_dispatch
+    plugin_type: dispatch
+    plugin_id: discord
+    config: {}
