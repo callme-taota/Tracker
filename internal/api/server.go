@@ -14,7 +14,6 @@ import (
 
 	"Tracker/internal/core"
 	"Tracker/internal/model"
-	"Tracker/internal/operator"
 	"Tracker/internal/plugin"
 	"Tracker/internal/pipeline"
 	"Tracker/internal/storage"
@@ -32,7 +31,7 @@ type Server struct {
 // NewServer creates an API server. DB may be nil. staticFS is optional (e.g. os.DirFS("web/dist")).
 func NewServer(eng *core.Engine, db *storage.DB, configPath string, staticFS fs.FS) *Server {
 	if eng != nil {
-		if b := operator.NewServerBridge(eng, db); b != nil {
+		if b := NewServerBridge(eng, db); b != nil {
 			llm_operator.SetBridge(b)
 		} else {
 			llm_operator.SetBridge(nil)

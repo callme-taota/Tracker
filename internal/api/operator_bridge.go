@@ -1,4 +1,4 @@
-package operator
+package api
 
 import (
 	"context"
@@ -8,11 +8,12 @@ import (
 
 	"Tracker/internal/core"
 	"Tracker/internal/core/llm"
+	"Tracker/internal/operator"
 	"Tracker/internal/pipeline"
 	"Tracker/internal/storage"
 )
 
-// ServerBridge implements Bridge using the core engine and SQLite DB.
+// ServerBridge implements operator.Bridge using the core engine and SQLite DB.
 type ServerBridge struct {
 	Eng *core.Engine
 	DB  *storage.DB
@@ -95,16 +96,16 @@ func (b *ServerBridge) GetJob(ctx context.Context, id int64) (*storage.Job, erro
 	return b.DB.GetJob(id)
 }
 
-func (b *ServerBridge) ListPlugins(ctx context.Context) ([]PluginListEntry, error) {
+func (b *ServerBridge) ListPlugins(ctx context.Context) ([]operator.PluginListEntry, error) {
 	_ = ctx
 	all := b.Eng.PM.ListAll()
-	out := make([]PluginListEntry, 0, len(all))
+	out := make([]operator.PluginListEntry, 0, len(all))
 	for _, p := range all {
 		rt := "builtin"
 		if b.Eng.PluginHost != nil && b.Eng.PluginHost.IsRemote(p.Name()) {
 			rt = "remote"
 		}
-		out = append(out, PluginListEntry{
+		out = append(out, operator.PluginListEntry{
 			Name: p.Name(), Version: p.Version(), Type: string(p.Type()), Runtime: rt,
 		})
 	}
@@ -143,5 +144,4 @@ func (b *ServerBridge) CorePing(ctx context.Context) (map[string]interface{}, er
 	return out, nil
 }
 
-// Ensure ServerBridge implements Bridge.
-var _ Bridge = (*ServerBridge)(nil)
+var _ operator.Bridge = (*ServerBridge)(nil)
