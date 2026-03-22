@@ -4,8 +4,6 @@ Goal: build a minimal but extensible AI information pipeline platform.
 
 The first version must be small, runnable, and architecturally clean.
 
-Target code size for MVP: 4500 – 6500 lines.
-
 ---
 
 Phase 1 — Core Framework

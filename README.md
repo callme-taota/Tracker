@@ -1,5 +1,7 @@
 # Tracker
 
+**[Simplified Chinese README → README.zh.md](README.zh.md)**
+
 Tracker is an open-source AI-powered information intelligence platform.
 
 It collects information from multiple sources, processes it through an extensible pipeline, summarizes insights using LLMs, and delivers personalized digests to users.
@@ -150,37 +152,37 @@ Optional environment variables (or set in `config.yaml`):
 - `./tracker plugin list` – list built-in plugins
 - `./tracker plugin install [name]` – show built-in plugins (marketplace placeholder)
 
-**配置（全可配置）**
+**Configuration (fully configurable)**
 
-- 应用配置：`tracker.yaml` 或 `config.yaml`，或环境变量覆盖。
-- 配置项：`app.db_path`、`app.pipeline_path`、`app.schedule`（cron）、`app.serve_port`、`app.env`（密钥等）。
-- 环境变量：`TRACKER_DB_PATH`、`TRACKER_PIPELINE_PATH`、`TRACKER_SCHEDULE`、`TRACKER_PORT`、`TRACKER_CONFIG`。
-- 示例：`configs/tracker.example.yaml`、`configs/pipeline.example.yaml`。
+- App config: `tracker.yaml` or `config.yaml`, with optional environment overrides.
+- Keys: `app.db_path`, `app.pipeline_path`, `app.schedule` (cron), `app.serve_port`, `app.env` (secrets, etc.).
+- Environment: `TRACKER_DB_PATH`, `TRACKER_PIPELINE_PATH`, `TRACKER_SCHEDULE`, `TRACKER_PORT`, `TRACKER_CONFIG`.
+- Examples: `configs/tracker.example.yaml`, `configs/pipeline.example.yaml`.
 
-**管道自动触发**
+**Scheduled pipeline runs**
 
-在 `tracker.yaml` 中设置 `app.schedule`（cron 表达式，如 `"0 */2 * * *"` 每 2 小时），然后执行 `./tracker serve`，管道会按计划自动运行并写入 DB。
+Set `app.schedule` in `tracker.yaml` (cron, e.g. `"0 */2 * * *"` every 2 hours), then run `./tracker serve`. The pipeline runs on that schedule and writes to the DB.
 
-**插件**
+**Plugins**
 
-- 数据源：`rss`（自定义 feeds）、`news`（主流新闻预设：global / cn，可配 `presets`、`extra_feeds`）。
-- 推送：`telegram`、`feishu`（飞书 webhook）、`discord`（Discord webhook）。配置 `webhook_url` 或对应环境变量。
+- Sources: `rss` (custom feeds), `news` (presets: global / cn; `presets`, `extra_feeds`).
+- Dispatch: `telegram`, `feishu` (Lark webhook), `discord` (Discord webhook). Set `webhook_url` or the matching env vars.
 
-**Web 界面（Vite + React + Tailwind / shadcn 风格）**
+**Web UI (Vite + React + Tailwind / shadcn-style)**
 
 ```bash
 make build-all
-# 或: make web-build && make build
+# or: make web-build && make build
 ./tracker serve
 ```
 
-说明见 [docs/zh/WEB_UI.md](docs/zh/WEB_UI.md)（英文：[docs/en/WEB_UI.md](docs/en/WEB_UI.md)）。文档索引：[docs/README.md](docs/README.md)。浏览器打开 http://localhost:8080。主要能力：
+See [docs/en/WEB_UI.md](docs/en/WEB_UI.md). Documentation index: [docs/README.md](docs/README.md). Open http://localhost:8080 in a browser.
 
-- **管道列表 / DAG 编辑器**（拖拽节点、连线、保存图）
-- **插件配置页**（`/plugins/:id`）与 **连接测试**（`POST /api/plugins/{id}/test`，如飞书 webhook）
-- 数据源、条目、摘要、兴趣、概览等
+- Pipeline list and **DAG editor** (drag nodes, edges, save graph)
+- Plugin config pages (`/plugins/:id`) and **connection test** (`POST /api/plugins/{id}/test`, e.g. Feishu webhook)
+- Sources, items, summaries, interests, dashboard
 
-使用 `-p` 指定端口，`-db` 指定 SQLite 路径（默认 `tracker.db`）。未构建前端时，`./tracker serve` 会提示先执行 `make web-build`。
+Use `-p` for port and `-db` for SQLite path (default `tracker.db`). If the frontend is not built, `./tracker serve` shows a hint to run `make web-build` first.
 
 **Docker**
 
@@ -189,25 +191,25 @@ make docker-build
 docker compose up
 ```
 
-部署与多实例规划见 [docs/zh/DEPLOYMENT.md](docs/zh/DEPLOYMENT.md)（英文：[docs/en/DEPLOYMENT.md](docs/en/DEPLOYMENT.md)）。
+Deployment and multi-instance notes: [docs/en/DEPLOYMENT.md](docs/en/DEPLOYMENT.md).
 
-**测试**
+**Tests**
 
 ```bash
 go test ./...
 ```
 
-在 **macOS** 上若出现 `dyld: missing LC_UUID`，请用外部链接跑测试：
+On **macOS**, if you hit `dyld: missing LC_UUID` when running tests, use external linking:
 
 ```bash
 make test
-# 或
+# or
 ./test.sh
-# 或
+# or
 go test -ldflags="-linkmode=external" ./...
 ```
 
-单测覆盖：config、pipeline、plugin、model、core、storage、scheduler、plugins（clean、keyword_interest）。部分测试依赖项目根目录下的 `configs/default.yaml`，建议在项目根执行。
+Tests cover config, pipeline, plugin, model, core, storage, scheduler, and plugins (e.g. clean, keyword_interest). Some tests expect `configs/default.yaml` at the **repository root**; run `go test` from the project root.
 
 ---
 
