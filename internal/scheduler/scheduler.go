@@ -27,6 +27,7 @@ func (r *Runner) Run() (count int, err error) {
 		return 0, err
 	}
 	eng := core.New()
+	defer eng.Close()
 	global := plugin.Config{
 		"api_key":   os.Getenv("OPENAI_API_KEY"),
 		"bot_token": os.Getenv("TELEGRAM_BOT_TOKEN"),

@@ -142,6 +142,13 @@ func (gr *GraphRunner) RunWithContext(ctx context.Context, pipelineID int64, g *
 				gr.hub.Emit(rt, pluginhub.Event{Type: pluginhub.NodeEnd, RunID: runID, PipelineID: pipelineID, NodeID: nid, PluginID: n.PluginID, ItemsIn: len(inputs)})
 			}
 
+		case plugin.TypeOperator:
+			err := &model.ItemError{Code: "operator_not_runnable", Message: "operator plugins cannot run inside pipeline graphs"}
+			if gr.hub != nil {
+				gr.hub.Emit(rt, pluginhub.Event{Type: pluginhub.ErrorEvent, RunID: runID, PipelineID: pipelineID, NodeID: nid, PluginID: n.PluginID, Err: err})
+			}
+			return nil, err
+
 		default:
 			err := &model.ItemError{Code: "unknown_node_type", Message: string(n.Type)}
 			if gr.hub != nil {

@@ -111,5 +111,9 @@ func builtinManifests() []plugin.Manifest {
 			ConfigSchema: json.RawMessage(`{"type":"object","properties":{"token":{"type":"string"},"database_id":{"type":"string"}}}`),
 			InputFormats: []string{plugin.FormatTrackerItemV1}, InputSchema: itemRef,
 		},
+		{
+			ID: "llm_operator", Version: "1.0.0", Kind: plugin.TypeOperator, DisplayName: "LLM operator (API)",
+			ConfigSchema: json.RawMessage(`{"type":"object","properties":{"llm_profile":{"type":"string","description":"LLM profile key (default, cheap, heavy)"},"max_tool_rounds":{"type":"integer"},"system_prompt_extra":{"type":"string"}}}`),
+		},
 	}
 }

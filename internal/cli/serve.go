@@ -16,6 +16,7 @@ import (
 	"Tracker/internal/core"
 	"Tracker/internal/pluginhub"
 	"Tracker/internal/scheduler"
+	"Tracker/internal/plugin"
 	"Tracker/internal/storage"
 	"Tracker/internal/worker"
 
@@ -41,6 +42,18 @@ func serveCmd() *cobra.Command {
 				app.DBPath = flagDB
 			}
 			eng := core.New()
+			defer eng.Close()
+			global := plugin.Config{
+				"api_key":   os.Getenv("OPENAI_API_KEY"),
+				"bot_token": os.Getenv("TELEGRAM_BOT_TOKEN"),
+				"chat_id":   os.Getenv("TELEGRAM_CHAT_ID"),
+			}
+			for k, v := range app.Env {
+				global[k] = v
+			}
+			if err := eng.Init(global); err != nil {
+				return fmt.Errorf("init engine: %w", err)
+			}
 			eng.Hub.Subscribe(func(rt *pluginhub.RuntimeContext, ev pluginhub.Event) {
 				if ev.Type == pluginhub.ErrorEvent && ev.Err != nil {
 					log.Printf("[pipeline] err node=%s plugin=%s: %v", ev.NodeID, ev.PluginID, ev.Err)

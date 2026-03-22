@@ -26,6 +26,7 @@ func runCmd() *cobra.Command {
 				return fmt.Errorf("load pipeline: %w", err)
 			}
 			eng := core.New()
+			defer eng.Close()
 			global := plugin.Config{
 				"api_key":   os.Getenv("OPENAI_API_KEY"),
 				"bot_token": os.Getenv("TELEGRAM_BOT_TOKEN"),

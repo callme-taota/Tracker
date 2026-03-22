@@ -54,7 +54,8 @@ func TestEngine_NewRegistersPlugins(t *testing.T) {
 		"rss": true, "news": true, "reddit": true, "github_trending": true, "x_fetch": true, "telegram_fetch": true,
 		"clean": true, "dedup_basic": true, "simhash_dedup": true, "embedding_dedup": true,
 		"cluster_kmeans": true, "llm_event_dedup": true,
-		"openai_summary": true, "keyword_interest": true, "telegram": true, "feishu": true, "discord": true, "notion": true,
+		"openai_summary": true, "keyword_interest": true, "llm_operator": true,
+		"telegram": true, "feishu": true, "discord": true, "notion": true,
 	}
 	for _, p := range all {
 		delete(want, p.Name())

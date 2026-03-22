@@ -9,4 +9,6 @@ const (
 	TypeSummary   Type = "summary"
 	TypeInterest  Type = "interest"
 	TypeDispatch  Type = "dispatch"
+	// TypeOperator is for system-level plugins (e.g. LLM operator API); not executable as a pipeline node.
+	TypeOperator Type = "operator"
 )

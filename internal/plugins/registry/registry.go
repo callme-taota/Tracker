@@ -13,6 +13,7 @@ import (
 	"Tracker/plugins/feishu"
 	"Tracker/plugins/github_trending"
 	"Tracker/plugins/keyword_interest"
+	"Tracker/plugins/llm_operator"
 	"Tracker/plugins/llm_event_dedup"
 	"Tracker/plugins/news"
 	"Tracker/plugins/notion"
@@ -47,6 +48,7 @@ func BuiltinPlugins() []plugin.Plugin {
 		llm_event_dedup.New(),
 		openai_summary.New(),
 		keyword_interest.New(),
+		llm_operator.New(),
 		telegram.New(),
 		feishu.New(),
 		discord.New(),
@@ -65,4 +67,13 @@ func RegisterAllWithHub(reg PluginRegistrar, hub *pluginhub.Hub) {
 		reg.Register(p)
 	}
 	RegisterBuiltinManifests(hub)
+}
+
+// BuiltinPluginIDs returns built-in plugin Name() values (for conflict checks with external plugins).
+func BuiltinPluginIDs() map[string]bool {
+	out := make(map[string]bool)
+	for _, p := range BuiltinPlugins() {
+		out[p.Name()] = true
+	}
+	return out
 }

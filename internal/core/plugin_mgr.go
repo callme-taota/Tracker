@@ -68,6 +68,25 @@ func (m *PluginManager) ListAll() []plugin.Plugin {
 	return out
 }
 
+// Unregister removes a plugin by name from both indexes. No-op if missing.
+func (m *PluginManager) Unregister(name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.byName[name]
+	if !ok {
+		return
+	}
+	delete(m.byName, name)
+	t := p.Type()
+	list := m.byType[t]
+	for i, existing := range list {
+		if existing.Name() == name {
+			m.byType[t] = append(list[:i], list[i+1:]...)
+			break
+		}
+	}
+}
+
 // InitAll initializes all registered plugins with the given global config.
 // Stage-specific config is passed when running the pipeline; here we pass nil or shared config.
 func (m *PluginManager) InitAll(global plugin.Config) error {

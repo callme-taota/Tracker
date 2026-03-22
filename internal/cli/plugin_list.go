@@ -13,6 +13,7 @@ func pluginListCmd() *cobra.Command {
 		Short: "List registered plugins",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			eng := core.New()
+			defer eng.Close()
 			for _, p := range eng.PM.ListAll() {
 				fmt.Printf("%s\t%s\t%s\n", p.Name(), p.Version(), p.Type())
 			}

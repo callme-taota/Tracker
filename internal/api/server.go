@@ -2,9 +2,6 @@ package api
 
 import (
 	"context"
-	"Tracker/internal/core"
-	"Tracker/internal/model"
-	"Tracker/internal/storage"
 	"encoding/json"
 	"io"
 	"io/fs"
@@ -15,8 +12,13 @@ import (
 	"strings"
 	"time"
 
+	"Tracker/internal/core"
+	"Tracker/internal/model"
+	"Tracker/internal/operator"
 	"Tracker/internal/plugin"
 	"Tracker/internal/pipeline"
+	"Tracker/internal/storage"
+	"Tracker/plugins/llm_operator"
 )
 
 // Server holds engine, storage and config for the HTTP API.
@@ -29,6 +31,13 @@ type Server struct {
 
 // NewServer creates an API server. DB may be nil. staticFS is optional (e.g. os.DirFS("web/dist")).
 func NewServer(eng *core.Engine, db *storage.DB, configPath string, staticFS fs.FS) *Server {
+	if eng != nil {
+		if b := operator.NewServerBridge(eng, db); b != nil {
+			llm_operator.SetBridge(b)
+		} else {
+			llm_operator.SetBridge(nil)
+		}
+	}
 	return &Server{Engine: eng, DB: db, ConfigPath: configPath, useFS: staticFS}
 }
 
@@ -45,6 +54,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/plugins/{id}/manifest", s.getPluginManifest)
 	mux.HandleFunc("POST /api/plugins/{id}/test", s.testPluginConfig)
 	mux.HandleFunc("GET /api/plugins", s.listPlugins)
+	mux.HandleFunc("POST /api/plugins/external/reload", s.reloadExternalPlugins)
+	mux.HandleFunc("POST /api/operator/chat", s.operatorChat)
 	mux.HandleFunc("GET /api/items", s.listItems)
 	mux.HandleFunc("GET /api/summaries", s.listSummaries)
 	mux.HandleFunc("GET /api/stats", s.stats)
@@ -291,19 +302,124 @@ func (s *Server) testPluginConfig(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, map[string]interface{}{"ok": true, "supported": true})
 }
 
+func (s *Server) reloadExternalPlugins(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	key := os.Getenv("TRACKER_PLUGIN_ADMIN_KEY")
+	if key == "" {
+		http.Error(w, "TRACKER_PLUGIN_ADMIN_KEY not set", http.StatusServiceUnavailable)
+		return
+	}
+	if strings.TrimSpace(r.Header.Get("X-Tracker-Plugin-Admin-Key")) != key {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if s.Engine == nil || s.Engine.PluginHost == nil {
+		http.Error(w, "plugin host unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if err := s.Engine.ReloadExternalPlugins(r.Context()); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonResponse(w, map[string]interface{}{"ok": true})
+}
+
+type operatorChatBody struct {
+	Messages      []plugin.ChatMessage `json:"messages"`
+	LLMProfile    string               `json:"llm_profile,omitempty"`
+	MaxToolRounds int                  `json:"max_tool_rounds,omitempty"`
+	Config        map[string]any       `json:"config,omitempty"`
+}
+
+func (s *Server) operatorChat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	want := os.Getenv("TRACKER_OPERATOR_API_KEY")
+	if want == "" {
+		http.Error(w, "TRACKER_OPERATOR_API_KEY not set", http.StatusServiceUnavailable)
+		return
+	}
+	if strings.TrimSpace(r.Header.Get("X-Tracker-Operator-Key")) != want {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if s.Engine == nil || s.DB == nil {
+		http.Error(w, "storage required for operator", http.StatusServiceUnavailable)
+		return
+	}
+	if !s.initEngineFromEnv(w) {
+		return
+	}
+	var body operatorChatBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if len(body.Messages) == 0 {
+		http.Error(w, "messages required", http.StatusBadRequest)
+		return
+	}
+	p := s.Engine.PM.GetByName("llm_operator")
+	if p == nil {
+		http.Error(w, "llm_operator not registered", http.StatusInternalServerError)
+		return
+	}
+	op, ok := p.(plugin.OperatorCapability)
+	if !ok {
+		http.Error(w, "llm_operator missing capability", http.StatusInternalServerError)
+		return
+	}
+	cfg := plugin.Config(body.Config)
+	if cfg == nil {
+		cfg = plugin.Config{}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+	resp, err := op.Chat(ctx, cfg, plugin.OperatorChatRequest{
+		Messages:      body.Messages,
+		LLMProfile:    body.LLMProfile,
+		MaxToolRounds: body.MaxToolRounds,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonResponse(w, resp)
+}
+
 func (s *Server) listPlugins(w http.ResponseWriter, r *http.Request) {
+	if s.Engine == nil {
+		jsonResponse(w, []any{})
+		return
+	}
 	all := s.Engine.PM.ListAll()
-	list := make([]struct {
+	type row struct {
 		Name    string `json:"name"`
 		Version string `json:"version"`
 		Type    string `json:"type"`
-	}, 0, len(all))
+		Runtime string `json:"runtime"`
+		Healthy *bool  `json:"healthy,omitempty"`
+	}
+	list := make([]row, 0, len(all))
 	for _, p := range all {
-		list = append(list, struct {
-			Name    string `json:"name"`
-			Version string `json:"version"`
-			Type    string `json:"type"`
-		}{p.Name(), p.Version(), string(p.Type())})
+		rt := "builtin"
+		if s.Engine.PluginHost != nil && s.Engine.PluginHost.IsRemote(p.Name()) {
+			rt = "remote"
+		}
+		entry := row{Name: p.Name(), Version: p.Version(), Type: string(p.Type()), Runtime: rt}
+		if rt == "remote" && s.Engine.PluginHost != nil {
+			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+			_, _, err := s.Engine.PluginHost.Health(ctx, p.Name())
+			cancel()
+			ok := err == nil
+			entry.Healthy = &ok
+		}
+		list = append(list, entry)
 	}
 	jsonResponse(w, list)
 }
@@ -688,6 +804,21 @@ func (s *Server) probePipeline(w http.ResponseWriter, r *http.Request) {
 			entry["config_error"] = err.Error()
 		} else {
 			entry["config_ok"] = true
+		}
+		if s.Engine.PluginHost != nil && s.Engine.PluginHost.IsRemote(n.PluginID) {
+			hctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+			status, details, herr := s.Engine.PluginHost.Health(hctx, n.PluginID)
+			cancel()
+			if herr != nil {
+				entry["plugin_health_ok"] = false
+				entry["plugin_health_error"] = herr.Error()
+			} else {
+				entry["plugin_health_ok"] = true
+				entry["plugin_health_status"] = status
+				if details != "" {
+					entry["plugin_health_details"] = details
+				}
+			}
 		}
 		steps = append(steps, entry)
 	}

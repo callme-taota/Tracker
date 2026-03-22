@@ -158,3 +158,67 @@ func TestStats_StorageEnabled(t *testing.T) {
 		t.Fatalf("storage_enabled want true got %#v", out)
 	}
 }
+
+func TestOperatorChat_NoEnvKey503(t *testing.T) {
+	t.Cleanup(func() { _ = os.Unsetenv("TRACKER_OPERATOR_API_KEY") })
+	_ = os.Unsetenv("TRACKER_OPERATOR_API_KEY")
+	eng := core.New()
+	if err := eng.Init(plugin.Config{}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := storage.Open(filepath.Join(t.TempDir(), "op_nokey.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	srv := api.NewServer(eng, db, defaultConfigPath(t), nil)
+	h := srv.Handler()
+	req := httptest.NewRequest(http.MethodPost, "/api/operator/chat", strings.NewReader(`{"messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status got %d want 503 body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestReloadExternalPlugins_NoAdminKey503(t *testing.T) {
+	t.Cleanup(func() { _ = os.Unsetenv("TRACKER_PLUGIN_ADMIN_KEY") })
+	_ = os.Unsetenv("TRACKER_PLUGIN_ADMIN_KEY")
+	eng := core.New()
+	defer eng.Close()
+	if err := eng.Init(plugin.Config{}); err != nil {
+		t.Fatal(err)
+	}
+	srv := api.NewServer(eng, nil, defaultConfigPath(t), nil)
+	h := srv.Handler()
+	req := httptest.NewRequest(http.MethodPost, "/api/plugins/external/reload", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status got %d want 503 body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestOperatorChat_Unauthorized401(t *testing.T) {
+	t.Setenv("TRACKER_OPERATOR_API_KEY", "correct-key")
+	t.Cleanup(func() { _ = os.Unsetenv("TRACKER_OPERATOR_API_KEY") })
+	eng := core.New()
+	if err := eng.Init(plugin.Config{}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := storage.Open(filepath.Join(t.TempDir(), "op_auth.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	srv := api.NewServer(eng, db, defaultConfigPath(t), nil)
+	h := srv.Handler()
+	req := httptest.NewRequest(http.MethodPost, "/api/operator/chat", strings.NewReader(`{"messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status got %d want 401 body=%s", rr.Code, rr.Body.String())
+	}
+}

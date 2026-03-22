@@ -78,6 +78,16 @@ func (h *Hub) RegisterManifest(m plugin.Manifest) {
 	h.manifests[m.ID] = m
 }
 
+// RemoveManifest deletes a manifest by plugin id.
+func (h *Hub) RemoveManifest(pluginID string) {
+	if pluginID == "" {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.manifests, pluginID)
+}
+
 // Manifest returns manifest for plugin id, or ok=false.
 func (h *Hub) Manifest(pluginID string) (plugin.Manifest, bool) {
 	h.mu.RLock()
@@ -140,6 +150,9 @@ func (h *Hub) ValidatePipelineGraph(g *pipeline.PipelineGraph) error {
 		m, ok := h.Manifest(n.PluginID)
 		if !ok {
 			return fmt.Errorf("pluginhub: no manifest for plugin %q (node %s)", n.PluginID, n.ID)
+		}
+		if m.Kind == plugin.TypeOperator {
+			return fmt.Errorf("pluginhub: plugin %q (kind operator) cannot be used in pipeline graphs (node %s)", n.PluginID, n.ID)
 		}
 		if err := ValidateConfigJSONSchema(m.ConfigSchema, n.Config); err != nil {
 			return fmt.Errorf("node %s (%s): %w", n.ID, n.PluginID, err)

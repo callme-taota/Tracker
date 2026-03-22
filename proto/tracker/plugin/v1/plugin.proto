@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package tracker.plugin.v1;
+
+option go_package = "Tracker/internal/gen/pluginv1;pluginv1";
+
+// Reference contract: the running host uses TCP length-prefixed JSON (see internal/pluginruntime).
+// This proto is optional for future gRPC codegen or cross-language stubs.
+
+// TrackerPlugin is implemented by external plugin processes; the host dials them after stdout handshake.
+// Logical operations (op values): handshake, health, ready, init, execute_source, execute_process,
+// execute_dispatch, test_config — request/response bodies are JSON (UTF-8) in json_payload.
+service TrackerPlugin {
+  rpc Call(CallRequest) returns (CallResponse);
+}
+
+message CallRequest {
+  string op = 1;
+  bytes json_payload = 2;
+}
+
+message CallResponse {
+  bool ok = 1;
+  bytes json_payload = 2;
+  string error_code = 3;
+  string error_message = 4;
+}

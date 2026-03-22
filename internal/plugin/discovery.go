@@ -18,6 +18,7 @@ func BuiltinPluginIDs() []string {
 		"llm_event_dedup",
 		"openai_summary",
 		"keyword_interest",
+		"llm_operator",
 		"telegram",
 		"feishu",
 		"discord",

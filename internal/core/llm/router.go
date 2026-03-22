@@ -88,10 +88,22 @@ func (r *Router) ProfileNames() []string {
 	return out
 }
 
+// MessageToolCall is an assistant tool invocation (OpenAI chat format).
+type MessageToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
 // Message is a chat message for the completions API.
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string            `json:"role"`
+	Content    string            `json:"content,omitempty"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
+	ToolCalls  []MessageToolCall `json:"tool_calls,omitempty"`
 }
 
 type chatRequest struct {
@@ -184,4 +196,132 @@ func (r *Router) Chat(ctx context.Context, profileName string, messages []Messag
 		lastErr = fmt.Errorf("llm: request failed")
 	}
 	return "", lastErr
+}
+
+// ToolSpec is an OpenAI-style function tool definition.
+type ToolSpec struct {
+	Type     string `json:"type"`
+	Function struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description,omitempty"`
+		Parameters  json.RawMessage `json:"parameters"`
+	} `json:"function"`
+}
+
+// ToolCall is one assistant tool invocation from the model.
+type ToolCall struct {
+	ID        string
+	Name      string
+	Arguments string
+}
+
+// ChatChoice is one completion choice (text and/or tool calls).
+type ChatChoice struct {
+	Content      string
+	ToolCalls    []ToolCall
+	FinishReason string
+}
+
+type chatRequestTools struct {
+	Model       string      `json:"model"`
+	Messages    []Message   `json:"messages"`
+	Temperature float64     `json:"temperature,omitempty"`
+	Tools       []ToolSpec  `json:"tools,omitempty"`
+	ToolChoice  interface{} `json:"tool_choice,omitempty"`
+}
+
+type chatResponseTools struct {
+	Choices []struct {
+		FinishReason string  `json:"finish_reason"`
+		Message      Message `json:"message"`
+	} `json:"choices"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// ChatWithTools runs chat/completions with function tools (OpenAI-compatible).
+func (r *Router) ChatWithTools(ctx context.Context, profileName string, messages []Message, tools []ToolSpec, temperature float64) (*ChatChoice, error) {
+	if r == nil || len(r.profiles) == 0 {
+		return nil, fmt.Errorf("llm: no profiles configured (set OPENAI_API_KEY)")
+	}
+	p, ok := r.profiles[profileName]
+	if !ok {
+		p, ok = r.profiles["default"]
+	}
+	if !ok {
+		return nil, fmt.Errorf("llm: unknown profile %q", profileName)
+	}
+	body, err := json.Marshal(chatRequestTools{
+		Model: p.Model, Messages: messages, Temperature: temperature, Tools: tools, ToolChoice: "auto",
+	})
+	if err != nil {
+		return nil, err
+	}
+	url := p.BaseURL + "/chat/completions"
+	var lastErr error
+	retries := p.MaxRetries
+	if retries < 1 {
+		retries = 1
+	}
+	for attempt := 0; attempt < retries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if p.APIKey != "" {
+			req.Header.Set("Authorization", "Bearer "+p.APIKey)
+		}
+		client := r.httpClient
+		if client == nil {
+			client = http.DefaultClient
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
+			continue
+		}
+		b, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			lastErr = fmt.Errorf("llm: HTTP %d: %s", resp.StatusCode, string(b))
+			continue
+		}
+		var cr chatResponseTools
+		if err := json.Unmarshal(b, &cr); err != nil {
+			lastErr = err
+			continue
+		}
+		if cr.Error != nil {
+			lastErr = fmt.Errorf("llm api: %s", cr.Error.Message)
+			continue
+		}
+		if len(cr.Choices) == 0 {
+			return nil, fmt.Errorf("llm: empty choices")
+		}
+		ch := cr.Choices[0]
+		out := &ChatChoice{
+			Content:      ch.Message.Content,
+			FinishReason: ch.FinishReason,
+		}
+		for _, tc := range ch.Message.ToolCalls {
+			if tc.Type != "" && tc.Type != "function" {
+				continue
+			}
+			out.ToolCalls = append(out.ToolCalls, ToolCall{
+				ID: tc.ID, Name: tc.Function.Name, Arguments: tc.Function.Arguments,
+			})
+		}
+		return out, nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("llm: request failed")
+	}
+	return nil, lastErr
 }
