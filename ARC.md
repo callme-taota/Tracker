@@ -299,11 +299,11 @@ The web platform communicates with the core engine via API.
 
 **Aligned implementation (see `docs/`):**
 
-- **Plugin ecosystem**: All built-in capabilities are **plugins** only; the core engine registers them through a single **registry** (`internal/plugins/registry`). **Manifest + PluginHub** (IO format tokens, lifecycle, `RuntimeContext`) — [docs/PLUGIN_CONTRACT.md](docs/PLUGIN_CONTRACT.md). See also [docs/PLUGIN_ECOSYSTEM.md](docs/PLUGIN_ECOSYSTEM.md).
-- **Pipeline as a graph**: Pipelines are **DAGs** of nodes and edges (not only linear lists); persisted dynamically via storage + API; the Web UI provides a **draggable node editor** (React Flow), similar in spirit to node-based tools (e.g. color nodes, blueprint-style graphs). See [docs/PIPELINE_GRAPH.md](docs/PIPELINE_GRAPH.md).
-- **Core services**: Shared **LLM router** (multi-profile), **storage router** (SQLite core DB + DSN/TCP checks for MySQL/Mongo/Redis/Kafka), **markdown** + **SSE** helpers; exposed on `RuntimeContext.Core`. See [docs/CORE_SERVICES.md](docs/CORE_SERVICES.md), `GET /api/core/ping`.
-- **Web UI**: Pipeline-first pages and API mapping — [docs/WEB_UI.md](docs/WEB_UI.md).
-- **部署 / 多实例**: Docker、任务抢占、连接池与扩展路径 — [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
+- **Plugin ecosystem**: All built-in capabilities are **plugins** only; the core engine registers them through a single **registry** (`internal/plugins/registry`). **Manifest + PluginHub** (IO format tokens, lifecycle, `RuntimeContext`) — [docs/en/PLUGIN_CONTRACT.md](docs/en/PLUGIN_CONTRACT.md). See also [docs/en/PLUGIN_ECOSYSTEM.md](docs/en/PLUGIN_ECOSYSTEM.md).
+- **Pipeline as a graph**: Pipelines are **DAGs** of nodes and edges (not only linear lists); persisted dynamically via storage + API; the Web UI provides a **draggable node editor** (React Flow), similar in spirit to node-based tools (e.g. color nodes, blueprint-style graphs). See [docs/en/PIPELINE_GRAPH.md](docs/en/PIPELINE_GRAPH.md).
+- **Core services**: Shared **LLM router** (multi-profile), **storage router** (SQLite core DB + DSN/TCP checks for MySQL/Mongo/Redis/Kafka), **markdown** + **SSE** helpers; exposed on `RuntimeContext.Core`. See [docs/en/CORE_SERVICES.md](docs/en/CORE_SERVICES.md), `GET /api/core/ping`.
+- **Web UI**: Pipeline-first pages and API mapping — [docs/en/WEB_UI.md](docs/en/WEB_UI.md).
+- **Deployment / multi-instance**: Docker, job claiming, pools — [docs/en/DEPLOYMENT.md](docs/en/DEPLOYMENT.md). **Chinese doc tree**: [docs/zh/README.md](docs/zh/README.md).
 - **Linear YAML** remains supported as an import/compat path: linear `stages[]` is converted to a chain graph for execution.
 
 ---
@@ -352,4 +352,4 @@ Web platform (API + node-based pipeline editor)
 
 This architecture allows Tracker to evolve into a full **AI information intelligence platform**.
 
-**Canonical detail docs:** [docs/PLUGIN_ECOSYSTEM.md](docs/PLUGIN_ECOSYSTEM.md), [docs/PIPELINE_GRAPH.md](docs/PIPELINE_GRAPH.md).
+**Canonical detail docs:** [docs/en/PLUGIN_ECOSYSTEM.md](docs/en/PLUGIN_ECOSYSTEM.md), [docs/en/PIPELINE_GRAPH.md](docs/en/PIPELINE_GRAPH.md). **Docs index:** [docs/README.md](docs/README.md).

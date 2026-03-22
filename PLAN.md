@@ -134,7 +134,7 @@ The web interface will communicate with the core engine via API.
 - [x] Execution: **GraphRunner**; linear YAML → `LinearToGraph` → same path; `POST/GET /api/pipeline/*` prefers DB default when set.
 - [x] **Built-in features remain plugins**; `registry.RegisterAll` only (core does not import `plugins/*` directly).
 - [x] Web: **React Flow** editor at `/pipelines/:id`; persist positions via `PUT` graph JSON.
-- Detail: [docs/PIPELINE_GRAPH.md](docs/PIPELINE_GRAPH.md), [docs/PLUGIN_ECOSYSTEM.md](docs/PLUGIN_ECOSYSTEM.md).
+- Detail: [docs/en/PIPELINE_GRAPH.md](docs/en/PIPELINE_GRAPH.md), [docs/en/PLUGIN_ECOSYSTEM.md](docs/en/PLUGIN_ECOSYSTEM.md).
 
 **Phase 7c — Jobs + probe + success/failure edges (docs aligned):**
 

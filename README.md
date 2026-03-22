@@ -174,7 +174,7 @@ make build-all
 ./tracker serve
 ```
 
-说明见 [docs/WEB_UI.md](docs/WEB_UI.md)。浏览器打开 http://localhost:8080。主要能力：
+说明见 [docs/zh/WEB_UI.md](docs/zh/WEB_UI.md)（英文：[docs/en/WEB_UI.md](docs/en/WEB_UI.md)）。文档索引：[docs/README.md](docs/README.md)。浏览器打开 http://localhost:8080。主要能力：
 
 - **管道列表 / DAG 编辑器**（拖拽节点、连线、保存图）
 - **插件配置页**（`/plugins/:id`）与 **连接测试**（`POST /api/plugins/{id}/test`，如飞书 webhook）
@@ -189,7 +189,7 @@ make docker-build
 docker compose up
 ```
 
-部署与多实例规划见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
+部署与多实例规划见 [docs/zh/DEPLOYMENT.md](docs/zh/DEPLOYMENT.md)（英文：[docs/en/DEPLOYMENT.md](docs/en/DEPLOYMENT.md)）。
 
 **测试**
 
