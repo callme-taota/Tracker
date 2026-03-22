@@ -1,4 +1,4 @@
-# Single-replica default. For horizontal scale see docs/DEPLOYMENT.md (shared SQLite is not recommended).
+# Single-replica default. For horizontal scale see docs/en/DEPLOYMENT.md (shared SQLite is not recommended).
 services:
   tracker:
     build: .

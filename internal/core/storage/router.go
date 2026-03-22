@@ -14,7 +14,7 @@ import (
 
 // Router holds optional storage backends. SQLite uses the already-vendored modernc driver.
 // MySQL / Mongo / Redis / Kafka keep DSN or broker strings for orchestration; full protocol
-// clients can be added via `go get` + thin wrappers (see docs/CORE_SERVICES.md).
+// clients can be added via `go get` + thin wrappers (see docs/en/CORE_SERVICES.md).
 type Router struct {
 	// SQLiteCore optional second DB for plugin key-value / dedup (separate from app data.db).
 	SQLiteCore *sql.DB

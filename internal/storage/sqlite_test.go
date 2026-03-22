@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -39,6 +40,62 @@ func TestOpenAndSources(t *testing.T) {
 	list, _ = db.ListSources()
 	if len(list) != 0 {
 		t.Errorf("after Delete want 0 sources got %d", len(list))
+	}
+}
+
+func TestJobsTableHasClaimColumnsAfterMigrate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "migrate.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var names []string
+	rows, err := db.conn.Query(`SELECT name FROM pragma_table_info('jobs')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, n)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	has := func(want string) bool {
+		for _, n := range names {
+			if n == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("claimed_by") || !has("claimed_at") {
+		t.Fatalf("jobs columns after migrate: want claimed_by and claimed_at, got %v", names)
+	}
+}
+
+func TestMigrateIdempotentOnFreshDB(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "idempotent.db")
+	conn, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.Exec(schemaSQL); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(conn); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(conn); err != nil {
+		t.Fatalf("second migrate: %v", err)
 	}
 }
 
