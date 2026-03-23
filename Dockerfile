@@ -2,6 +2,8 @@
 # Frontend
 FROM node:22-alpine AS web
 WORKDIR /web
+ARG VITE_TRACKER_API_KEY=""
+ENV VITE_TRACKER_API_KEY=$VITE_TRACKER_API_KEY
 COPY web/package.json ./
 # Lockfile optional in repo
 COPY web/package-lock.json* ./

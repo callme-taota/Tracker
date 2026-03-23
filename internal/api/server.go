@@ -58,20 +58,36 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/items", s.listItems)
 	mux.HandleFunc("GET /api/summaries", s.listSummaries)
 	mux.HandleFunc("GET /api/stats", s.stats)
-	mux.HandleFunc("GET /api/pipeline/status", s.pipelineStatus)
-	mux.HandleFunc("POST /api/pipeline/run", s.pipelineRun)
-	mux.HandleFunc("GET /api/pipelines", s.listPipelines)
-	mux.HandleFunc("POST /api/pipelines", s.createPipeline)
-	mux.HandleFunc("GET /api/pipelines/{id}", s.getPipeline)
-	mux.HandleFunc("PUT /api/pipelines/{id}", s.updatePipeline)
-	mux.HandleFunc("DELETE /api/pipelines/{id}", s.deletePipeline)
-	mux.HandleFunc("POST /api/pipelines/{id}/run", s.runPipelineByID)
-	mux.HandleFunc("POST /api/pipelines/{id}/run-async", s.enqueuePipelineRun)
-	mux.HandleFunc("POST /api/pipelines/{id}/probe", s.probePipeline)
-	mux.HandleFunc("POST /api/pipelines/{id}/rerun", s.rerunPipeline)
-	mux.HandleFunc("GET /api/jobs/{id}", s.getJob)
+	mux.HandleFunc("GET /api/pipeline/status", s.requirePipelineAPIKey(s.pipelineStatus))
+	mux.HandleFunc("POST /api/pipeline/run", s.requirePipelineAPIKey(s.pipelineRun))
+	mux.HandleFunc("GET /api/pipelines", s.requirePipelineAPIKey(s.listPipelines))
+	mux.HandleFunc("POST /api/pipelines", s.requirePipelineAPIKey(s.createPipeline))
+	mux.HandleFunc("GET /api/pipelines/{id}", s.requirePipelineAPIKey(s.getPipeline))
+	mux.HandleFunc("PUT /api/pipelines/{id}", s.requirePipelineAPIKey(s.updatePipeline))
+	mux.HandleFunc("DELETE /api/pipelines/{id}", s.requirePipelineAPIKey(s.deletePipeline))
+	mux.HandleFunc("POST /api/pipelines/{id}/run", s.requirePipelineAPIKey(s.runPipelineByID))
+	mux.HandleFunc("POST /api/pipelines/{id}/run-async", s.requirePipelineAPIKey(s.enqueuePipelineRun))
+	mux.HandleFunc("POST /api/pipelines/{id}/probe", s.requirePipelineAPIKey(s.probePipeline))
+	mux.HandleFunc("POST /api/pipelines/{id}/rerun", s.requirePipelineAPIKey(s.rerunPipeline))
+	mux.HandleFunc("GET /api/jobs/{id}", s.requirePipelineAPIKey(s.getJob))
 	mux.HandleFunc("GET /assets/{path...}", s.serveStatic)
 	return &spaHandler{mux: mux, serveIndex: s.serveIndex}
+}
+
+func (s *Server) requirePipelineAPIKey(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		want := strings.TrimSpace(os.Getenv("TRACKER_API_KEY"))
+		if want == "" {
+			http.Error(w, "TRACKER_API_KEY not set", http.StatusServiceUnavailable)
+			return
+		}
+		got := strings.TrimSpace(r.Header.Get("X-Tracker-Api-Key"))
+		if got != want {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
 }
 
 // spaHandler routes /api and /assets to mux, everything else (GET) to index for SPA client-side routing.

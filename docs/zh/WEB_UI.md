@@ -45,6 +45,18 @@ cd web && npm install && npm run dev
 
 需本机已安装 Node.js 与 npm。
 
+鉴权环境变量：
+
+- 后端：`TRACKER_API_KEY`
+- 前端：`VITE_TRACKER_API_KEY`（应与后端一致）
+
+建议：
+
+```bash
+cp .env.example .env
+cp web/.env.example web/.env.local
+```
+
 ## 部署
 
 见同目录 [DEPLOYMENT.md](DEPLOYMENT.md)。英文版见 [../en/DEPLOYMENT.md](../en/DEPLOYMENT.md)。

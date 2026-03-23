@@ -1,12 +1,16 @@
 # Single-replica default. For horizontal scale see docs/en/DEPLOYMENT.md (shared SQLite is not recommended).
 services:
   tracker:
-    build: .
+    build:
+      context: .
+      args:
+        VITE_TRACKER_API_KEY: ${VITE_TRACKER_API_KEY:-}
     image: tracker:local
     ports:
       - "8080:8080"
     environment:
       TRACKER_DB_PATH: /data/tracker.db
+      TRACKER_API_KEY: ${TRACKER_API_KEY:-}
       TRACKER_INSTANCE_ID: ${TRACKER_INSTANCE_ID:-compose-1}
     volumes:
       - tracker_data:/data

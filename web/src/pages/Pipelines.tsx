@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Plus, RefreshCw } from 'lucide-react'
+import { Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { api, type PipelineGraphDTO, type PipelineSummary } from '@/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -24,6 +24,7 @@ export default function PipelinesPage() {
   const [loading, setLoading] = useState(true)
   const [storageOn, setStorageOn] = useState<boolean | null>(null)
   const [creating, setCreating] = useState(false)
+  const [deletingId, setDeletingId] = useState<number | null>(null)
   const [jobId, setJobId] = useState('')
   const [jobStatus, setJobStatus] = useState<string>('')
   const [notice, setNotice] = useState<string | null>(null)
@@ -95,6 +96,24 @@ export default function PipelinesPage() {
     }
   }
 
+  const removePipeline = async (id: number, name: string, isDefault: boolean) => {
+    const tip = isDefault
+      ? `将删除默认管道「${name}」，确认继续？`
+      : `确认删除管道「${name}」？`
+    if (!window.confirm(tip)) return
+    setDeletingId(id)
+    setNotice(null)
+    try {
+      await api.deletePipeline(id)
+      await load()
+      setNotice(`已删除管道 #${id}`)
+    } catch (e) {
+      setNotice(String(e))
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <Card>
@@ -104,10 +123,10 @@ export default function PipelinesPage() {
             <CardDescription>打开「编辑」进入可拖拽画布；异步任务由服务端 worker 消费。</CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">
-            {storageOn !== false && list.length === 0 && !loading ? (
+            {storageOn !== false && !loading ? (
               <Button size="sm" onClick={createSamplePipeline} disabled={creating}>
                 <Plus className="h-4 w-4" />
-                {creating ? '创建中…' : '新建示例管道'}
+                {creating ? '创建中…' : '新建管道(示例)'}
               </Button>
             ) : null}
             <Button variant="outline" size="sm" onClick={load} disabled={loading}>
@@ -195,6 +214,15 @@ export default function PipelinesPage() {
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => probe(row.id)}>
                           探针
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          disabled={deletingId === row.id}
+                          onClick={() => removePipeline(row.id, row.name, row.is_default)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          {deletingId === row.id ? '删除中…' : '删除'}
                         </Button>
                       </div>
                     </TableCell>

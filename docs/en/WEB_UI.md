@@ -48,6 +48,18 @@ cd web && npm install && npm run dev
 
 Requires Node.js and npm.
 
+Auth environment variables:
+
+- Backend: `TRACKER_API_KEY`
+- Frontend: `VITE_TRACKER_API_KEY` (must match backend key)
+
+Recommended setup:
+
+```bash
+cp .env.example .env
+cp web/.env.example web/.env.local
+```
+
 ## Deployment
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) in this folder. Chinese: [../zh/DEPLOYMENT.md](../zh/DEPLOYMENT.md).

@@ -64,6 +64,7 @@ cp configs/default.yaml config.yaml
 
 - `OPENAI_API_KEY`：摘要能力（可选）
 - `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID`：Telegram 推送（可选）
+- `TRACKER_API_KEY`：Web 管道相关接口鉴权 key（必填，前端需提供同值 `VITE_TRACKER_API_KEY`）
 
 **其他命令**
 
@@ -102,6 +103,20 @@ make build-all
 - 数据源、条目、摘要、兴趣、概览等
 
 `-p` 指定端口，`-db` 指定 SQLite 路径（默认 `tracker.db`）。未构建前端时，`serve` 会提示先执行 `make web-build`。
+
+前后端鉴权变量（建议）：
+
+```bash
+# 后端
+cp .env.example .env
+# 编辑 .env，设置 TRACKER_API_KEY
+
+# 前端（本地开发）
+cp web/.env.example web/.env.local
+# 编辑 web/.env.local，设置 VITE_TRACKER_API_KEY（需与后端一致）
+```
+
+如果使用 Docker Compose，请在项目根 `.env` 中同时设置 `TRACKER_API_KEY` 与 `VITE_TRACKER_API_KEY`（构建镜像时注入前端，运行容器时注入后端）。
 
 **Docker**
 

@@ -1,4 +1,22 @@
 const API = ''
+const PIPELINE_API_KEY = (import.meta.env.VITE_TRACKER_API_KEY as string | undefined)?.trim() ?? ''
+
+function withAuthHeaders(base?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = { ...(base ?? {}) }
+  if (PIPELINE_API_KEY) headers['X-Tracker-Api-Key'] = PIPELINE_API_KEY
+  return headers
+}
+
+async function readError(r: Response): Promise<string> {
+  const text = (await r.text()).trim()
+  if (r.status === 401 || r.status === 403) {
+    return text || '鉴权失败：请检查 VITE_TRACKER_API_KEY 与服务端 TRACKER_API_KEY 是否一致'
+  }
+  if (r.status === 503 && /TRACKER_API_KEY not set/i.test(text)) {
+    return '服务端未配置 TRACKER_API_KEY，管道相关接口不可用'
+  }
+  return text || `请求失败(${r.status})`
+}
 
 export type Source = { id: number; url: string; type: string; config: string; created_at: string }
 export type Interest = { id: number; name: string; keywords: string; config: string; created_at: string }
@@ -99,30 +117,30 @@ export type PluginTestResult = {
 }
 
 async function get<T>(path: string): Promise<T> {
-  const r = await fetch(API + path)
-  if (!r.ok) throw new Error(await r.text())
+  const r = await fetch(API + path, { headers: withAuthHeaders() })
+  if (!r.ok) throw new Error(await readError(r))
   return r.json()
 }
 async function post<T>(path: string, body?: object): Promise<T> {
   const r = await fetch(API + path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: body ? JSON.stringify(body) : undefined,
   })
-  if (!r.ok) throw new Error(await r.text())
+  if (!r.ok) throw new Error(await readError(r))
   return r.status === 204 ? (null as T) : r.json()
 }
 async function put(path: string, body: object): Promise<void> {
   const r = await fetch(API + path, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   })
-  if (!r.ok) throw new Error(await r.text())
+  if (!r.ok) throw new Error(await readError(r))
 }
 async function del(path: string): Promise<void> {
-  const r = await fetch(API + path, { method: 'DELETE' })
-  if (!r.ok) throw new Error(await r.text())
+  const r = await fetch(API + path, { method: 'DELETE', headers: withAuthHeaders() })
+  if (!r.ok) throw new Error(await readError(r))
 }
 
 export const api = {
@@ -168,11 +186,11 @@ export const api = {
       API + `/api/plugins/${encodeURIComponent(pluginId)}/test`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ config }),
       },
     )
-    const text = await r.text()
+    const text = (await r.text()).trim()
     let data: { ok?: boolean; supported?: boolean; error?: string } = {}
     try {
       data = JSON.parse(text) as typeof data
@@ -183,6 +201,12 @@ export const api = {
       return { ok: false, supported: false, error: data.error || text || '不支持在线测试' }
     }
     if (!r.ok) {
+      if (r.status === 401 || r.status === 403) {
+        return { ok: false, supported: data.supported !== false, error: '鉴权失败：请检查 API Key 配置' }
+      }
+      if (r.status === 503 && /TRACKER_API_KEY not set/i.test(text)) {
+        return { ok: false, supported: data.supported !== false, error: '服务端未配置 TRACKER_API_KEY' }
+      }
       return { ok: false, supported: data.supported !== false, error: data.error || text }
     }
     return {

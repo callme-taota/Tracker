@@ -145,6 +145,7 @@ Optional environment variables (or set in `config.yaml`):
 
 - `OPENAI_API_KEY` – for AI summary (optional; without it, content is truncated only)
 - `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` – for Telegram dispatch (optional; skipped if unset)
+- `TRACKER_API_KEY` – required auth key for pipeline-related Web APIs (frontend must use matching `VITE_TRACKER_API_KEY`)
 
 **Other commands**
 
@@ -183,6 +184,20 @@ See [docs/en/WEB_UI.md](docs/en/WEB_UI.md). Documentation index: [docs/README.md
 - Sources, items, summaries, interests, dashboard
 
 Use `-p` for port and `-db` for SQLite path (default `tracker.db`). If the frontend is not built, `./tracker serve` shows a hint to run `make web-build` first.
+
+Recommended auth env setup:
+
+```bash
+# Backend
+cp .env.example .env
+# edit .env and set TRACKER_API_KEY
+
+# Frontend local dev
+cp web/.env.example web/.env.local
+# edit web/.env.local and set VITE_TRACKER_API_KEY (same value)
+```
+
+If you deploy with Docker Compose, set both `TRACKER_API_KEY` and `VITE_TRACKER_API_KEY` in the project root `.env` file (frontend key is injected at build time, backend key at runtime).
 
 **Docker**
 

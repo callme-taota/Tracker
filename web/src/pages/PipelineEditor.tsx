@@ -18,13 +18,12 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Link, useParams } from 'react-router-dom'
-import { Play, Save, FlaskConical, ArrowLeft, ExternalLink, Zap } from 'lucide-react'
+import { Play, Save, FlaskConical, ArrowLeft, ExternalLink, Zap, Trash2 } from 'lucide-react'
 import { api, type GraphEdgeDTO, type GraphNodeDTO, type PipelineGraphDTO, type Plugin } from '@/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
@@ -280,6 +279,15 @@ function PipelineEditorInner({ pipelineId }: { pipelineId: number }) {
     }
   }
 
+  const removeSelectedNode = useCallback(() => {
+    if (!selectedNodeId) return
+    const removingId = selectedNodeId
+    setNodes((nds) => nds.filter((n) => n.id !== removingId))
+    setEdges((eds) => eds.filter((e) => e.source !== removingId && e.target !== removingId))
+    setSelectedNodeId(null)
+    setNodeTestMsg(null)
+  }, [selectedNodeId, setEdges, setNodes])
+
   const updateSelectedConfig = useCallback(
     (cfg: Record<string, unknown>) => {
       if (!selectedNodeId) return
@@ -299,6 +307,13 @@ function PipelineEditorInner({ pipelineId }: { pipelineId: number }) {
     }
     return Array.from(m.entries()).sort(([a], [b]) => a.localeCompare(b))
   }, [plugins])
+
+  useEffect(() => {
+    if (selectedNodeId && !nodes.some((n) => n.id === selectedNodeId)) {
+      setSelectedNodeId(null)
+      setNodeTestMsg(null)
+    }
+  }, [nodes, selectedNodeId])
 
   const save = async () => {
     const graph = flowToGraph(pipeName, nodes, edges)
@@ -361,6 +376,10 @@ function PipelineEditorInner({ pipelineId }: { pipelineId: number }) {
           </Label>
         </div>
         <div className="ml-auto flex flex-wrap gap-2">
+          <Button size="sm" variant="destructive" onClick={removeSelectedNode} disabled={!selectedNodeId}>
+            <Trash2 className="h-4 w-4" />
+            删除节点
+          </Button>
           <Button size="sm" variant="outline" onClick={probe}>
             <FlaskConical className="h-4 w-4" />
             探针
@@ -387,11 +406,11 @@ function PipelineEditorInner({ pipelineId }: { pipelineId: number }) {
       ) : null}
 
       <div className="flex min-h-0 flex-1 gap-2">
-        <aside className="flex h-full min-h-0 w-56 shrink-0 flex-col rounded-lg border bg-card">
+        <aside className="flex h-full min-h-0 w-56 shrink-0 flex-col overflow-hidden rounded-lg border bg-card">
           <div className="border-b px-3 py-2 text-sm font-medium">插件库</div>
-          <p className="px-3 py-1 text-xs text-muted-foreground">拖到画布添加节点；节点可在画布上拖动；连线连接输出→输入。</p>
-          <ScrollArea className="min-h-0 flex-1 px-2 pb-2">
-            <div className="flex flex-col gap-3 pr-2">
+          <p className="shrink-0 px-3 py-1 text-xs text-muted-foreground">拖到画布添加节点；节点可在画布上拖动；连线连接输出→输入。</p>
+          <div className="min-h-0 flex-1 overflow-y-auto px-2">
+            <div className="flex flex-col gap-3 pb-2 pr-2 pt-1">
               {grouped.map(([type, list]) => (
                 <div key={type}>
                   <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">{type}</div>
@@ -417,7 +436,7 @@ function PipelineEditorInner({ pipelineId }: { pipelineId: number }) {
                 </div>
               ))}
             </div>
-          </ScrollArea>
+          </div>
         </aside>
 
         <div className="relative min-h-[min(420px,50vh)] min-w-0 flex-1 rounded-lg border bg-background">
@@ -475,6 +494,10 @@ function PipelineEditorInner({ pipelineId }: { pipelineId: number }) {
                 >
                   <Zap className="h-3 w-3" />
                   {nodeTestLoading ? '测试中…' : '测试配置'}
+                </Button>
+                <Button type="button" size="sm" variant="destructive" onClick={removeSelectedNode}>
+                  <Trash2 className="h-3 w-3" />
+                  删除节点
                 </Button>
               </div>
             ) : null}
