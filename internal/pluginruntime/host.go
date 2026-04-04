@@ -31,6 +31,7 @@ type Host struct {
 
 	mu       sync.Mutex
 	entries  map[string]*pluginEntry
+	extra    []PluginSpec
 	lastInit plugin.Config
 }
 
@@ -110,6 +111,14 @@ func (h *Host) Load(ctx context.Context) error {
 	for _, spec := range fc.Plugins {
 		if err := h.startPlugin(ctx, spec); err != nil {
 			log.Printf("pluginruntime: external plugin %q: %v", spec.ID, err)
+		}
+	}
+	h.mu.Lock()
+	extra := append([]PluginSpec(nil), h.extra...)
+	h.mu.Unlock()
+	for _, spec := range extra {
+		if err := h.startPlugin(ctx, spec); err != nil {
+			log.Printf("pluginruntime: workspace plugin %q: %v", spec.ID, err)
 		}
 	}
 	return nil
@@ -251,4 +260,12 @@ func (h *Host) Shutdown(_ context.Context) {
 func (h *Host) Reload(ctx context.Context) error {
 	h.Shutdown(ctx)
 	return h.Load(ctx)
+}
+
+// SetExtraSpecs replaces in-memory managed plugin specs and reloads all remote plugins.
+func (h *Host) SetExtraSpecs(ctx context.Context, specs []PluginSpec) error {
+	h.mu.Lock()
+	h.extra = append([]PluginSpec(nil), specs...)
+	h.mu.Unlock()
+	return h.Reload(ctx)
 }

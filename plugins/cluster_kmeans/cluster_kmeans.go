@@ -6,6 +6,7 @@ import (
 
 	"Tracker/internal/model"
 	"Tracker/internal/plugin"
+	"Tracker/plugins/sharedutil"
 )
 
 // Plugin assigns an online k-means style cluster id using 3-D features (title len, content len, hour).
@@ -20,10 +21,15 @@ func New() plugin.Plugin {
 	return &Plugin{k: 3}
 }
 
-func (p *Plugin) Name() string             { return "cluster_kmeans" }
-func (p *Plugin) Version() string          { return "1.0" }
-func (p *Plugin) Type() plugin.Type        { return plugin.TypeProcessor }
-func (p *Plugin) Init(cfg plugin.Config) error { return nil }
+func (p *Plugin) Name() string      { return "cluster_kmeans" }
+func (p *Plugin) Version() string   { return "1.0" }
+func (p *Plugin) Type() plugin.Type { return plugin.TypeProcessor }
+func (p *Plugin) Init(cfg plugin.Config) error {
+	if k := sharedutil.Int(cfg, "k", p.k); k > 0 {
+		p.k = k
+	}
+	return nil
+}
 
 func feat(it *model.Item) []float64 {
 	h := 0.0
@@ -47,8 +53,15 @@ func (p *Plugin) Execute(in *model.Item, cfg plugin.Config) (*model.Item, error)
 		return nil, nil
 	}
 	f := feat(in)
+	k := sharedutil.Int(cfg, "k", p.k)
+	if k <= 0 {
+		k = p.k
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if k != p.k && k > 0 {
+		p.k = k
+	}
 	if len(p.centroids) < p.k {
 		c := make([]float64, len(f))
 		copy(c, f)

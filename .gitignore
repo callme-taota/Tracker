@@ -25,4 +25,5 @@ sdk/plugin-rust/target/
 *.swo
 *~
 
+.tracker/
 .idea/

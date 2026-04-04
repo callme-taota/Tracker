@@ -2,7 +2,9 @@ package llm_event_dedup
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -12,6 +14,7 @@ import (
 
 	"Tracker/internal/model"
 	"Tracker/internal/plugin"
+	"Tracker/plugins/sharedutil"
 )
 
 // Plugin asks a small chat model if the current item duplicates the previous event.
@@ -32,17 +35,48 @@ func New() plugin.Plugin {
 	}
 }
 
-func (p *Plugin) Name() string             { return "llm_event_dedup" }
-func (p *Plugin) Version() string          { return "1.0" }
-func (p *Plugin) Type() plugin.Type        { return plugin.TypeProcessor }
+func (p *Plugin) Name() string      { return "llm_event_dedup" }
+func (p *Plugin) Version() string   { return "1.0" }
+func (p *Plugin) Type() plugin.Type { return plugin.TypeProcessor }
 
 func (p *Plugin) Init(cfg plugin.Config) error {
-	p.apiKey = plugin.GetString(cfg, "api_key")
-	if p.apiKey == "" {
-		p.apiKey = os.Getenv("OPENAI_API_KEY")
-	}
-	if m := plugin.GetString(cfg, "model"); m != "" {
+	p.apiKey = sharedutil.StringWithEnv(cfg, "api_key", os.Getenv("OPENAI_API_KEY"))
+	if m := strings.TrimSpace(plugin.GetString(cfg, "model")); m != "" {
 		p.model = m
+	}
+	if baseURL := strings.TrimSpace(plugin.GetString(cfg, "base_url")); baseURL != "" {
+		p.baseURL = strings.TrimRight(baseURL, "/")
+	}
+	return nil
+}
+
+// TestConfig validates the configured OpenAI-compatible chat endpoint.
+func (p *Plugin) TestConfig(ctx context.Context, cfg plugin.Config) error {
+	apiKey, baseURL := p.resolveConfig(cfg)
+	if err := sharedutil.RequireFields(map[string]string{"api_key": apiKey, "base_url": baseURL}); err != nil {
+		return err
+	}
+	body, _ := json.Marshal(map[string]interface{}{
+		"model": p.resolveModel(cfg),
+		"messages": []map[string]string{
+			{"role": "user", "content": "Reply with YES"},
+		},
+		"temperature": 0.0,
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("llm_event_dedup chat: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
 	return nil
 }
@@ -58,16 +92,13 @@ func (p *Plugin) Execute(in *model.Item, cfg plugin.Config) (*model.Item, error)
 		p.last = &cp
 		return in, nil
 	}
-	key := plugin.GetString(cfg, "api_key")
-	if key == "" {
-		key = p.apiKey
-	}
+	key, _ := p.resolveConfig(cfg)
 	if key == "" {
 		cp := *in
 		p.last = &cp
 		return in, nil
 	}
-	dup, err := p.askDuplicate(key, p.last, in)
+	dup, err := p.askDuplicate(key, p.resolveBaseURL(cfg), p.resolveModel(cfg), p.last, in)
 	if err != nil {
 		cp := *in
 		p.last = &cp
@@ -81,16 +112,36 @@ func (p *Plugin) Execute(in *model.Item, cfg plugin.Config) (*model.Item, error)
 	return in, nil
 }
 
-func (p *Plugin) askDuplicate(apiKey string, a, b *model.Item) (bool, error) {
+func (p *Plugin) resolveConfig(cfg plugin.Config) (apiKey, baseURL string) {
+	apiKey = sharedutil.StringWithEnv(cfg, "api_key", p.apiKey)
+	baseURL = p.resolveBaseURL(cfg)
+	return apiKey, baseURL
+}
+
+func (p *Plugin) resolveBaseURL(cfg plugin.Config) string {
+	if v := strings.TrimSpace(plugin.GetString(cfg, "base_url")); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	return strings.TrimRight(p.baseURL, "/")
+}
+
+func (p *Plugin) resolveModel(cfg plugin.Config) string {
+	if m := strings.TrimSpace(plugin.GetString(cfg, "model")); m != "" {
+		return m
+	}
+	return p.model
+}
+
+func (p *Plugin) askDuplicate(apiKey, baseURL, modelName string, a, b *model.Item) (bool, error) {
 	prompt := "Are these two news items likely the SAME event? Reply only YES or NO.\nA: " + a.Title + " " + a.URL + "\nB: " + b.Title + " " + b.URL
 	body, _ := json.Marshal(map[string]interface{}{
-		"model": p.model,
+		"model": modelName,
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
 		"temperature": 0.0,
 	})
-	req, err := http.NewRequest(http.MethodPost, p.baseURL+"/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return false, err
 	}

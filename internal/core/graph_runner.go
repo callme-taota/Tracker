@@ -48,7 +48,11 @@ func (gr *GraphRunner) RunWithContext(ctx context.Context, pipelineID int64, g *
 	if g == nil || len(g.Nodes) == 0 {
 		return nil, nil
 	}
-	if err := g.Validate(); err != nil {
+	if gr.hub != nil {
+		if err := gr.hub.ValidatePipelineGraph(g); err != nil {
+			return nil, err
+		}
+	} else if err := g.Validate(); err != nil {
 		return nil, err
 	}
 	order, err := g.TopologicalOrder()

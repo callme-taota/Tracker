@@ -2,27 +2,31 @@ package embedding_dedup
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"Tracker/internal/model"
 	"Tracker/internal/plugin"
+	"Tracker/plugins/sharedutil"
 )
 
 // Plugin calls OpenAI-compatible embeddings and drops items too similar to prior vectors (cosine >= threshold).
 type Plugin struct {
-	mu          sync.Mutex
-	apiKey      string
-	model       string
-	baseURL     string
-	threshold   float64
-	vectors     [][]float64
-	httpClient  *http.Client
+	mu         sync.Mutex
+	apiKey     string
+	model      string
+	baseURL    string
+	threshold  float64
+	vectors    [][]float64
+	httpClient *http.Client
 }
 
 func New() plugin.Plugin {
@@ -32,20 +36,48 @@ func New() plugin.Plugin {
 	}
 }
 
-func (p *Plugin) Name() string             { return "embedding_dedup" }
-func (p *Plugin) Version() string          { return "1.0" }
-func (p *Plugin) Type() plugin.Type        { return plugin.TypeProcessor }
+func (p *Plugin) Name() string      { return "embedding_dedup" }
+func (p *Plugin) Version() string   { return "1.0" }
+func (p *Plugin) Type() plugin.Type { return plugin.TypeProcessor }
 
 func (p *Plugin) Init(cfg plugin.Config) error {
-	p.apiKey = plugin.GetString(cfg, "api_key")
-	if p.apiKey == "" {
-		p.apiKey = os.Getenv("OPENAI_API_KEY")
-	}
-	if m := plugin.GetString(cfg, "model"); m != "" {
+	p.apiKey = sharedutil.StringWithEnv(cfg, "api_key", os.Getenv("OPENAI_API_KEY"))
+	if m := strings.TrimSpace(plugin.GetString(cfg, "model")); m != "" {
 		p.model = m
 	}
-	if b := plugin.GetString(cfg, "base_url"); b != "" {
-		p.baseURL = b
+	if b := strings.TrimSpace(plugin.GetString(cfg, "base_url")); b != "" {
+		p.baseURL = strings.TrimRight(b, "/")
+	}
+	if threshold := sharedutil.Float(cfg, "threshold", p.threshold); threshold > 0 && threshold <= 1 {
+		p.threshold = threshold
+	}
+	return nil
+}
+
+// TestConfig validates the OpenAI-compatible embedding endpoint credentials.
+func (p *Plugin) TestConfig(ctx context.Context, cfg plugin.Config) error {
+	key, baseURL := p.resolveConfig(cfg)
+	if err := sharedutil.RequireFields(map[string]string{"api_key": key, "base_url": baseURL}); err != nil {
+		return err
+	}
+	body, _ := json.Marshal(map[string]interface{}{
+		"model": p.resolveModel(cfg),
+		"input": "tracker connectivity test",
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/embeddings", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+key)
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("embedding api: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
 	return nil
 }
@@ -54,24 +86,22 @@ func (p *Plugin) Execute(in *model.Item, cfg plugin.Config) (*model.Item, error)
 	if in == nil {
 		return nil, nil
 	}
-	key := plugin.GetString(cfg, "api_key")
-	if key == "" {
-		key = p.apiKey
-	}
+	key, _ := p.resolveConfig(cfg)
 	if key == "" {
 		out := *in
 		return &out, nil
 	}
 	text := in.Title + "\n" + in.URL + "\n" + truncate(in.Content, 6000)
-	vec, err := p.embed(key, text)
+	vec, err := p.embed(key, p.resolveBaseURL(cfg), p.resolveModel(cfg), text)
 	if err != nil || len(vec) == 0 {
 		out := *in
 		return &out, nil
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	threshold := p.resolveThreshold(cfg)
 	for _, prev := range p.vectors {
-		if cosine(prev, vec) >= p.threshold {
+		if cosine(prev, vec) >= threshold {
 			return nil, nil
 		}
 	}
@@ -93,11 +123,39 @@ func truncate(s string, n int) string {
 	return s[:n]
 }
 
-func (p *Plugin) embed(apiKey, input string) ([]float64, error) {
+func (p *Plugin) resolveConfig(cfg plugin.Config) (apiKey, baseURL string) {
+	apiKey = sharedutil.StringWithEnv(cfg, "api_key", p.apiKey)
+	baseURL = p.resolveBaseURL(cfg)
+	return apiKey, baseURL
+}
+
+func (p *Plugin) resolveBaseURL(cfg plugin.Config) string {
+	if b := strings.TrimSpace(plugin.GetString(cfg, "base_url")); b != "" {
+		return strings.TrimRight(b, "/")
+	}
+	return strings.TrimRight(p.baseURL, "/")
+}
+
+func (p *Plugin) resolveModel(cfg plugin.Config) string {
+	if m := strings.TrimSpace(plugin.GetString(cfg, "model")); m != "" {
+		return m
+	}
+	return p.model
+}
+
+func (p *Plugin) resolveThreshold(cfg plugin.Config) float64 {
+	threshold := sharedutil.Float(cfg, "threshold", p.threshold)
+	if threshold <= 0 || threshold > 1 {
+		return p.threshold
+	}
+	return threshold
+}
+
+func (p *Plugin) embed(apiKey, baseURL, model, input string) ([]float64, error) {
 	body, _ := json.Marshal(map[string]interface{}{
-		"model": p.model, "input": input,
+		"model": model, "input": input,
 	})
-	req, err := http.NewRequest(http.MethodPost, p.baseURL+"/embeddings", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/embeddings", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

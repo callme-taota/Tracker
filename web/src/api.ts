@@ -20,7 +20,120 @@ async function readError(r: Response): Promise<string> {
 
 export type Source = { id: number; url: string; type: string; config: string; created_at: string }
 export type Interest = { id: number; name: string; keywords: string; config: string; created_at: string }
-export type Plugin = { name: string; version: string; type: string }
+export type Plugin = {
+  name: string
+  version: string
+  type: string
+  /** DAG：是否向下游产出 item 流（服务端推断 + manifest 可覆盖） */
+  emits_items?: boolean
+  accepts_items?: boolean
+  allow_outbound_edges?: boolean
+  allow_no_incoming?: boolean
+  input_formats?: string[]
+  output_formats?: string[]
+  compatible_with?: string[]
+}
+export type PluginPackage = {
+  id: number
+  plugin_id: string
+  name: string
+  runtime: string
+  source_kind: string
+  review_status: string
+  risk_level: string
+  enabled: boolean
+  current_version_id?: number | null
+  last_build_status?: string
+  last_build_log?: string
+  last_build_at?: string | null
+  last_run_status?: string
+  last_run_log?: string
+  last_run_at?: string | null
+  created_at: string
+  updated_at: string
+}
+export type PluginPackageVersion = {
+  id: number
+  package_id: number
+  version: string
+  manifest_json: string
+  entry_file: string
+  build_command: string
+  run_command: string
+  review_report_json?: string
+  source_checksum?: string
+  code_dir?: string
+  created_at: string
+}
+export type PluginPackageDetail = {
+  package: PluginPackage
+  current_version: PluginPackageVersion | null
+  runtime_status?: {
+    enabled: boolean
+    loaded: boolean
+    health_status?: string
+    health_details?: string
+    health_error?: string
+  }
+}
+export type PluginImportRequest = {
+  plugin_id: string
+  name: string
+  runtime: string
+  source_kind?: string
+  version?: string
+  manifest_json: string
+  entry_file: string
+  build_command?: string
+  run_command?: string
+  files: Record<string, string>
+  enabled?: boolean
+}
+export type ReviewFinding = { severity: string; code: string; message: string; path?: string }
+export type ReviewReport = { status: string; risk_level: string; summary: string; findings: ReviewFinding[] | null }
+export type PluginRunResult = {
+  ok: boolean
+  log: string
+  error?: string
+  last_build_status?: string
+  last_run_status?: string
+}
+export type PluginGroup = {
+  id: number
+  name: string
+  description: string
+  graph: PipelineGraphDTO
+  io?: Record<string, unknown>
+  current_version_id?: number | null
+  current_version?: string
+  version_count: number
+  reference_count: number
+  outdated_ref_count: number
+  created_at: string
+  updated_at: string
+}
+export type PluginGroupVersion = {
+  id: number
+  group_id: number
+  version: string
+  graph: PipelineGraphDTO
+  io?: Record<string, unknown>
+  source_pipeline_id?: number | null
+  change_note?: string
+  created_at: string
+}
+export type PluginQualityRow = {
+  name: string
+  type: string
+  runtime: string
+  score: number
+  category: string
+  issues: Array<{ code: string; message: string }> | null
+  has_schema: boolean
+  has_tester: boolean
+  needs_tester?: boolean
+  has_pipeline_io?: boolean
+}
 export type Stage = { name: string; plugin_id: string; type: string }
 export type GraphNodeDTO = {
   id: string
@@ -37,7 +150,14 @@ export type GraphEdgeDTO = {
   targetHandle?: string
   on_condition?: string
 }
-export type PipelineGraphDTO = { name: string; nodes: GraphNodeDTO[]; edges: GraphEdgeDTO[] }
+export type GraphGroupRefDTO = {
+  group_id: number
+  group_name?: string
+  group_version_id: number
+  group_version?: string
+  node_ids?: string[]
+}
+export type PipelineGraphDTO = { name: string; nodes: GraphNodeDTO[]; edges: GraphEdgeDTO[]; group_refs?: GraphGroupRefDTO[] }
 export type PipelineSummary = { id: number; name: string; is_default: boolean; updated_at: string }
 export type PipelineDetail = {
   id: number
@@ -151,6 +271,33 @@ export const api = {
   addInterest: (name: string, keywords: string, config?: string) => post<{ id: number }>('/api/interests', { name, keywords, config: config || '' }),
   deleteInterest: (id: number) => del(`/api/interests/${id}`),
   getPlugins: () => get<Plugin[]>('/api/plugins'),
+  getPluginQualityReport: () => get<PluginQualityRow[]>('/api/plugins/quality-report'),
+  listPluginPackages: () => get<PluginPackage[]>('/api/plugin-packages'),
+  createPluginPackage: (body: PluginImportRequest) => post<PluginPackageDetail & { review: ReviewReport }>('/api/plugin-packages', body),
+  importPluginPackage: (body: PluginImportRequest) => post<PluginPackageDetail & { review: ReviewReport }>('/api/plugin-packages/import', body),
+  getPluginPackage: (id: number) => get<PluginPackageDetail>(`/api/plugin-packages/${id}`),
+  updatePluginPackage: (id: number, body: Partial<PluginImportRequest> & { enabled?: boolean }) =>
+    put(`/api/plugin-packages/${id}`, body),
+  getPluginPackageFiles: (id: number) => get<Record<string, string>>(`/api/plugin-packages/${id}/files`),
+  putPluginPackageFile: (id: number, path: string, content: string) =>
+    put(`/api/plugin-packages/${id}/files`, { path, content }),
+  deletePluginPackageFile: (id: number, path: string) => del(`/api/plugin-packages/${id}/files?path=${encodeURIComponent(path)}`),
+  reviewPluginPackage: (id: number) => post<ReviewReport>(`/api/plugin-packages/${id}/review`),
+  buildPluginPackage: (id: number) => post<PluginRunResult>(`/api/plugin-packages/${id}/build`),
+  runPluginPackage: (id: number) => post<PluginRunResult>(`/api/plugin-packages/${id}/run`),
+  stopPluginPackage: (id: number) => post<null>(`/api/plugin-packages/${id}/stop`),
+  exportPluginPackage: (id: number) =>
+    get<{ package: PluginPackage; version: PluginPackageVersion; files: Record<string, string> }>(`/api/plugin-packages/${id}/export`),
+  listPluginGroups: () => get<PluginGroup[]>('/api/plugin-groups'),
+  createPluginGroup: (name: string, description: string, graph: PipelineGraphDTO, io?: Record<string, unknown>) =>
+    post<PluginGroup>('/api/plugin-groups', { name, description, graph, io }),
+  extractPluginGroupFromPipeline: (pipeline_id: number, name: string, description: string) =>
+    post<PluginGroup>('/api/plugin-groups/extract', { pipeline_id, name, description }),
+  getPluginGroup: (id: number) => get<PluginGroup>(`/api/plugin-groups/${id}`),
+  listPluginGroupVersions: (id: number) => get<PluginGroupVersion[]>(`/api/plugin-groups/${id}/versions`),
+  updatePluginGroup: (id: number, name: string, description: string, graph: PipelineGraphDTO, io?: Record<string, unknown>) =>
+    put(`/api/plugin-groups/${id}`, { name, description, graph, io }),
+  deletePluginGroup: (id: number) => del(`/api/plugin-groups/${id}`),
   getItems: (limit?: number, offset?: number) =>
     get<{ items: Item[]; total: number }>(`/api/items?limit=${limit ?? 50}&offset=${offset ?? 0}`),
   getSummaries: (limit?: number, offset?: number) =>

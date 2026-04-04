@@ -14,8 +14,8 @@ import (
 
 	"Tracker/internal/core"
 	"Tracker/internal/model"
-	"Tracker/internal/plugin"
 	"Tracker/internal/pipeline"
+	"Tracker/internal/plugin"
 	"Tracker/internal/storage"
 	"Tracker/plugins/llm_operator"
 )
@@ -53,7 +53,28 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/plugins/{id}/manifest", s.getPluginManifest)
 	mux.HandleFunc("POST /api/plugins/{id}/test", s.testPluginConfig)
 	mux.HandleFunc("GET /api/plugins", s.listPlugins)
+	mux.HandleFunc("GET /api/plugins/quality-report", s.requirePipelineAPIKey(s.pluginQualityReport))
 	mux.HandleFunc("POST /api/plugins/external/reload", s.reloadExternalPlugins)
+	mux.HandleFunc("GET /api/plugin-packages", s.requirePipelineAPIKey(s.listPluginPackages))
+	mux.HandleFunc("POST /api/plugin-packages", s.requirePipelineAPIKey(s.createPluginPackage))
+	mux.HandleFunc("POST /api/plugin-packages/import", s.requirePipelineAPIKey(s.importPluginPackage))
+	mux.HandleFunc("GET /api/plugin-packages/{id}", s.requirePipelineAPIKey(s.getPluginPackage))
+	mux.HandleFunc("PUT /api/plugin-packages/{id}", s.requirePipelineAPIKey(s.updatePluginPackage))
+	mux.HandleFunc("GET /api/plugin-packages/{id}/export", s.requirePipelineAPIKey(s.exportPluginPackage))
+	mux.HandleFunc("GET /api/plugin-packages/{id}/files", s.requirePipelineAPIKey(s.getPluginPackageFiles))
+	mux.HandleFunc("PUT /api/plugin-packages/{id}/files", s.requirePipelineAPIKey(s.putPluginPackageFile))
+	mux.HandleFunc("DELETE /api/plugin-packages/{id}/files", s.requirePipelineAPIKey(s.deletePluginPackageFile))
+	mux.HandleFunc("POST /api/plugin-packages/{id}/review", s.requirePipelineAPIKey(s.reviewPluginPackage))
+	mux.HandleFunc("POST /api/plugin-packages/{id}/build", s.requirePipelineAPIKey(s.buildPluginPackage))
+	mux.HandleFunc("POST /api/plugin-packages/{id}/run", s.requirePipelineAPIKey(s.runPluginPackage))
+	mux.HandleFunc("POST /api/plugin-packages/{id}/stop", s.requirePipelineAPIKey(s.stopPluginPackage))
+	mux.HandleFunc("GET /api/plugin-groups", s.requirePipelineAPIKey(s.listPluginGroups))
+	mux.HandleFunc("POST /api/plugin-groups", s.requirePipelineAPIKey(s.createPluginGroup))
+	mux.HandleFunc("POST /api/plugin-groups/extract", s.requirePipelineAPIKey(s.extractPluginGroupFromPipeline))
+	mux.HandleFunc("GET /api/plugin-groups/{id}", s.requirePipelineAPIKey(s.getPluginGroup))
+	mux.HandleFunc("GET /api/plugin-groups/{id}/versions", s.requirePipelineAPIKey(s.listPluginGroupVersions))
+	mux.HandleFunc("PUT /api/plugin-groups/{id}", s.requirePipelineAPIKey(s.updatePluginGroup))
+	mux.HandleFunc("DELETE /api/plugin-groups/{id}", s.requirePipelineAPIKey(s.deletePluginGroup))
 	mux.HandleFunc("POST /api/operator/chat", s.operatorChat)
 	mux.HandleFunc("GET /api/items", s.listItems)
 	mux.HandleFunc("GET /api/summaries", s.listSummaries)
@@ -193,9 +214,9 @@ func (s *Server) addInterest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Name    string `json:"name"`
+		Name     string `json:"name"`
 		Keywords string `json:"keywords"`
-		Config  string `json:"config"`
+		Config   string `json:"config"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -414,11 +435,19 @@ func (s *Server) listPlugins(w http.ResponseWriter, r *http.Request) {
 	}
 	all := s.Engine.PM.ListAll()
 	type row struct {
-		Name    string `json:"name"`
-		Version string `json:"version"`
-		Type    string `json:"type"`
-		Runtime string `json:"runtime"`
-		Healthy *bool  `json:"healthy,omitempty"`
+		Name               string                 `json:"name"`
+		Version            string                 `json:"version"`
+		Type               string                 `json:"type"`
+		Runtime            string                 `json:"runtime"`
+		Healthy            *bool                  `json:"healthy,omitempty"`
+		InputFormats       []string               `json:"input_formats,omitempty"`
+		OutputFormats      []string               `json:"output_formats,omitempty"`
+		PipelineIO         *plugin.PipelineIOSpec `json:"pipeline_io,omitempty"`
+		EmitsItems         bool                   `json:"emits_items"`
+		AcceptsItems       bool                   `json:"accepts_items"`
+		AllowOutboundEdges bool                   `json:"allow_outbound_edges"`
+		AllowNoIncoming    bool                   `json:"allow_no_incoming"`
+		CompatibleWith     []string               `json:"compatible_with,omitempty"`
 	}
 	list := make([]row, 0, len(all))
 	for _, p := range all {
@@ -427,6 +456,29 @@ func (s *Server) listPlugins(w http.ResponseWriter, r *http.Request) {
 			rt = "remote"
 		}
 		entry := row{Name: p.Name(), Version: p.Version(), Type: string(p.Type()), Runtime: rt}
+		if m, ok := s.Engine.Hub.Manifest(p.Name()); ok {
+			entry.InputFormats = m.InputFormats
+			entry.OutputFormats = m.OutputFormats
+			entry.PipelineIO = m.PipelineIO
+			entry.EmitsItems = m.InferredEmitsItems()
+			entry.AcceptsItems = m.InferredAcceptsItems()
+			entry.AllowOutboundEdges = m.InferredAllowOutboundEdges()
+			entry.AllowNoIncoming = m.AllowNoIncomingEdge()
+			entry.CompatibleWith = m.CompatibleWith
+		} else {
+			switch p.Type() {
+			case plugin.TypeSource:
+				entry.EmitsItems, entry.AcceptsItems, entry.AllowOutboundEdges = true, false, true
+			case plugin.TypeDispatch:
+				entry.EmitsItems, entry.AcceptsItems, entry.AllowOutboundEdges = false, true, false
+			case plugin.TypeProcessor, plugin.TypeSummary, plugin.TypeInterest:
+				entry.EmitsItems, entry.AcceptsItems, entry.AllowOutboundEdges = true, true, true
+			default:
+				entry.AcceptsItems = p.Type() != plugin.TypeSource
+				entry.EmitsItems = p.Type() != plugin.TypeDispatch && p.Type() != plugin.TypeOperator
+				entry.AllowOutboundEdges = entry.EmitsItems
+			}
+		}
 		if rt == "remote" && s.Engine.PluginHost != nil {
 			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 			_, _, err := s.Engine.PluginHost.Health(ctx, p.Name())
@@ -506,17 +558,17 @@ func (s *Server) resolveDefaultPipelineForStatus() map[string]interface{} {
 	stages := make([]map[string]string, 0, len(pipe.Stages))
 	for _, st := range pipe.Stages {
 		stages = append(stages, map[string]string{
-			"name":       st.Name,
-			"plugin_id":  st.PluginID,
-			"type":       string(st.PluginType),
+			"name":      st.Name,
+			"plugin_id": st.PluginID,
+			"type":      string(st.PluginType),
 		})
 	}
 	return map[string]interface{}{
-		"source":       "file",
-		"config_path":  configPath,
-		"name":         pipe.Name,
-		"status":       "idle",
-		"stages":       stages,
+		"source":        "file",
+		"config_path":   configPath,
+		"name":          pipe.Name,
+		"status":        "idle",
+		"stages":        stages,
 		"linear_stages": stages,
 	}
 }
@@ -899,15 +951,15 @@ func (s *Server) rerunPipeline(w http.ResponseWriter, r *http.Request) {
 }
 
 type itemResp struct {
-	ID        int64   `json:"id"`
-	SourceID  *int64  `json:"source_id"`
-	Title     string  `json:"title"`
-	URL       string  `json:"url"`
-	Content   string  `json:"content"`
-	Summary   string  `json:"summary"`
-	Timestamp string  `json:"timestamp"`
-	Raw       string  `json:"raw"`
-	CreatedAt string  `json:"created_at"`
+	ID        int64  `json:"id"`
+	SourceID  *int64 `json:"source_id"`
+	Title     string `json:"title"`
+	URL       string `json:"url"`
+	Content   string `json:"content"`
+	Summary   string `json:"summary"`
+	Timestamp string `json:"timestamp"`
+	Raw       string `json:"raw"`
+	CreatedAt string `json:"created_at"`
 }
 
 func (s *Server) listItems(w http.ResponseWriter, r *http.Request) {
@@ -977,11 +1029,11 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 		summaries, _ = s.DB.CountSummaries()
 	}
 	jsonResponse(w, map[string]interface{}{
-		"sources":           sources,
-		"items":             items,
-		"interests":         interests,
-		"summaries":         summaries,
-		"storage_enabled":   s.DB != nil,
+		"sources":         sources,
+		"items":           items,
+		"interests":       interests,
+		"summaries":       summaries,
+		"storage_enabled": s.DB != nil,
 	})
 }
 

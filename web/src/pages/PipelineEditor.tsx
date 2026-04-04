@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type DragEvent, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type DragEvent, type MouseEvent, type SetStateAction } from 'react'
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -18,8 +18,8 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Link, useParams } from 'react-router-dom'
-import { Play, Save, FlaskConical, ArrowLeft, ExternalLink, Zap, Trash2 } from 'lucide-react'
-import { api, type GraphEdgeDTO, type GraphNodeDTO, type PipelineGraphDTO, type Plugin } from '@/api'
+import { Play, Save, FlaskConical, ArrowLeft, ExternalLink, Zap, Trash2, Boxes } from 'lucide-react'
+import { api, type GraphEdgeDTO, type GraphGroupRefDTO, type GraphNodeDTO, type PipelineGraphDTO, type Plugin, type PluginGroup } from '@/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -29,11 +29,14 @@ import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
 import { loadPluginPreset } from '@/lib/plugin-presets'
+import { pluginsToEdgeMetaMap, validatePipelineConnection } from '@/lib/pipeline-edge'
 import { PluginConfigPanel } from '@/plugin-ui/PluginConfigPanel'
 
 const DND_MIME = 'application/tracker-plugin'
+const DND_GROUP_MIME = 'application/tracker-plugin-group'
 
 type PalettePayload = { plugin_id: string; plugin_type: string }
+type GroupPalettePayload = { group_id: number }
 
 function PluginNode({ data, selected }: NodeProps) {
   const t = String(data.plugin_type ?? '')
@@ -68,7 +71,7 @@ function PluginNode({ data, selected }: NodeProps) {
 
 const nodeTypes = { plugin: PluginNode }
 
-function graphToFlow(g: PipelineGraphDTO): { nodes: Node[]; edges: Edge[] } {
+function graphToFlow(g: PipelineGraphDTO): { nodes: Node[]; edges: Edge[]; groupRefs: GraphGroupRefDTO[] } {
   const nodes: Node[] = (g.nodes ?? []).map((n) => ({
     id: n.id,
     type: 'plugin',
@@ -88,10 +91,10 @@ function graphToFlow(g: PipelineGraphDTO): { nodes: Node[]; edges: Edge[] } {
     targetHandle: e.targetHandle,
     data: e.on_condition ? { on_condition: e.on_condition } : undefined,
   }))
-  return { nodes, edges }
+  return { nodes, edges, groupRefs: g.group_refs ?? [] }
 }
 
-function flowToGraph(name: string, nodes: Node[], edges: Edge[]): PipelineGraphDTO {
+function flowToGraph(name: string, nodes: Node[], edges: Edge[], groupRefs: GraphGroupRefDTO[]): PipelineGraphDTO {
   const gn: GraphNodeDTO[] = nodes.map((n) => ({
     id: n.id,
     plugin_type: String(n.data?.plugin_type ?? 'processor'),
@@ -107,7 +110,15 @@ function flowToGraph(name: string, nodes: Node[], edges: Edge[]): PipelineGraphD
     targetHandle: e.targetHandle ?? undefined,
     on_condition: typeof e.data?.on_condition === 'string' ? e.data.on_condition : undefined,
   }))
-  return { name, nodes: gn, edges: ge }
+  const validNodeIDs = new Set(gn.map((n) => n.id))
+  return {
+    name,
+    nodes: gn,
+    edges: ge,
+    group_refs: groupRefs
+      .map((ref) => ({ ...ref, node_ids: (ref.node_ids ?? []).filter((id) => validNodeIDs.has(id)) }))
+      .filter((ref) => (ref.node_ids?.length ?? 0) > 0),
+  }
 }
 
 let nodeSeq = 0
@@ -116,24 +127,79 @@ function nextNodeId() {
   return `n_${Date.now()}_${nodeSeq}`
 }
 
+function expandPluginGroup(group: PluginGroup, position: { x: number; y: number }): { nodes: Node[]; edges: Edge[]; groupRef?: GraphGroupRefDTO } {
+  const src = group.graph
+  const minX = Math.min(...(src.nodes ?? []).map((n) => n.position?.x ?? 0), 0)
+  const minY = Math.min(...(src.nodes ?? []).map((n) => n.position?.y ?? 0), 0)
+  const idMap = new Map<string, string>()
+  const nodes: Node[] = (src.nodes ?? []).map((n) => {
+    const id = nextNodeId()
+    idMap.set(n.id, id)
+    return {
+      id,
+      type: 'plugin',
+      position: {
+        x: position.x + ((n.position?.x ?? 0) - minX),
+        y: position.y + ((n.position?.y ?? 0) - minY),
+      },
+      data: {
+        plugin_id: n.plugin_id,
+        plugin_type: n.plugin_type,
+        config: n.config ?? {},
+        label: `${group.name}:${n.id}`,
+      },
+    }
+  })
+  const edges: Edge[] = (src.edges ?? []).map((e, idx) => ({
+    id: `group_${group.id}_${idx}_${Date.now()}`,
+    source: idMap.get(e.source) ?? e.source,
+    target: idMap.get(e.target) ?? e.target,
+    sourceHandle: e.sourceHandle,
+    targetHandle: e.targetHandle,
+    data: e.on_condition ? { on_condition: e.on_condition } : undefined,
+  }))
+  return {
+    nodes,
+    edges,
+    groupRef:
+      group.current_version_id != null
+        ? {
+            group_id: group.id,
+            group_name: group.name,
+            group_version_id: group.current_version_id,
+            group_version: group.current_version,
+            node_ids: nodes.map((n) => n.id),
+          }
+        : undefined,
+  }
+}
+
 function FlowCanvas({
   nodes,
   edges,
   onNodesChange,
   onEdgesChange,
   onConnect,
+  isValidConnection,
   onNodeClick,
   onPaneClick,
   setNodes,
+  setEdges,
+  setGroupRefs,
+  groups,
 }: {
   nodes: Node[]
   edges: Edge[]
   onNodesChange: ReturnType<typeof useNodesState>[2]
   onEdgesChange: ReturnType<typeof useEdgesState>[2]
   onConnect: (c: Connection) => void
+  isValidConnection?: (c: Connection | Edge) => boolean
   onNodeClick: (_: MouseEvent, node: Node) => void
   onPaneClick: () => void
   setNodes: ReturnType<typeof useNodesState>[1]
+  setEdges: ReturnType<typeof useEdgesState>[1]
+  setGroupRefs: Dispatch<SetStateAction<GraphGroupRefDTO[]>>
+  groups: PluginGroup[]
 }) {
   const { screenToFlowPosition } = useReactFlow()
 
@@ -145,6 +211,23 @@ function FlowCanvas({
   const onDrop = useCallback(
     (e: DragEvent) => {
       e.preventDefault()
+      const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+      const groupRaw = e.dataTransfer.getData(DND_GROUP_MIME)
+      if (groupRaw) {
+        let payload: GroupPalettePayload
+        try {
+          payload = JSON.parse(groupRaw) as GroupPalettePayload
+        } catch {
+          return
+        }
+        const group = groups.find((g) => g.id === payload.group_id)
+        if (!group) return
+        const expanded = expandPluginGroup(group, position)
+        setNodes((nds) => [...nds, ...expanded.nodes])
+        setEdges((eds) => [...eds, ...expanded.edges])
+        if (expanded.groupRef) setGroupRefs((refs) => [...refs, expanded.groupRef!])
+        return
+      }
       const raw = e.dataTransfer.getData(DND_MIME)
       if (!raw) return
       let p: PalettePayload
@@ -154,7 +237,6 @@ function FlowCanvas({
         return
       }
       if (!p.plugin_id) return
-      const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
       const id = nextNodeId()
       const preset = loadPluginPreset(p.plugin_id)
       setNodes((nds) => [
@@ -172,7 +254,7 @@ function FlowCanvas({
         },
       ])
     },
-    [screenToFlowPosition, setNodes],
+    [groups, screenToFlowPosition, setEdges, setGroupRefs, setNodes],
   )
 
   return (
@@ -182,6 +264,7 @@ function FlowCanvas({
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
+      isValidConnection={isValidConnection}
       onNodeClick={onNodeClick}
       onPaneClick={onPaneClick}
       onDrop={onDrop}
@@ -207,14 +290,36 @@ function PipelineEditorInner({ pipelineId }: { pipelineId: number }) {
   const [pipeName, setPipeName] = useState('default')
   const [isDefault, setIsDefault] = useState(false)
   const [plugins, setPlugins] = useState<Plugin[]>([])
+  const [pluginGroups, setPluginGroups] = useState<PluginGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [nodeTestLoading, setNodeTestLoading] = useState(false)
   const [nodeTestMsg, setNodeTestMsg] = useState<string | null>(null)
+  const [groupRefs, setGroupRefs] = useState<GraphGroupRefDTO[]>([])
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+
+  const pluginEdgeMeta = useMemo(() => pluginsToEdgeMetaMap(plugins), [plugins])
+
+  const isValidConnection = useCallback(
+    (c: Connection | Edge) => {
+      if (pluginEdgeMeta.size === 0) return true
+      const srcNode = nodes.find((n) => n.id === c.source)
+      const tgtNode = nodes.find((n) => n.id === c.target)
+      if (!srcNode || !tgtNode) return false
+      const sp = String(srcNode.data?.plugin_id ?? '')
+      const tp = String(tgtNode.data?.plugin_id ?? '')
+      const r = validatePipelineConnection(sp, tp, pluginEdgeMeta)
+      if (!r.ok) {
+        setNotice({ kind: 'err', text: r.reason })
+        return false
+      }
+      return true
+    },
+    [nodes, pluginEdgeMeta],
+  )
 
   const onConnect = useCallback(
     (c: Connection) =>
@@ -224,6 +329,7 @@ function PipelineEditorInner({ pipelineId }: { pipelineId: number }) {
 
   useEffect(() => {
     api.getPlugins().then(setPlugins).catch(() => {})
+    api.listPluginGroups().then(setPluginGroups).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -235,14 +341,16 @@ function PipelineEditorInner({ pipelineId }: { pipelineId: number }) {
         if (cancelled) return
         setPipeName(d.name)
         setIsDefault(d.is_default)
-        const { nodes: n, edges: e } = graphToFlow(d.graph)
+        const { nodes: n, edges: e, groupRefs: refs } = graphToFlow(d.graph)
         setNodes(n)
         setEdges(e)
+        setGroupRefs(refs)
       } catch (err) {
         if (!cancelled) {
           setNotice({ kind: 'err', text: String(err) })
           setNodes([])
           setEdges([])
+          setGroupRefs([])
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -284,6 +392,11 @@ function PipelineEditorInner({ pipelineId }: { pipelineId: number }) {
     const removingId = selectedNodeId
     setNodes((nds) => nds.filter((n) => n.id !== removingId))
     setEdges((eds) => eds.filter((e) => e.source !== removingId && e.target !== removingId))
+    setGroupRefs((refs) =>
+      refs
+        .map((ref) => ({ ...ref, node_ids: (ref.node_ids ?? []).filter((id) => id !== removingId) }))
+        .filter((ref) => (ref.node_ids?.length ?? 0) > 0),
+    )
     setSelectedNodeId(null)
     setNodeTestMsg(null)
   }, [selectedNodeId, setEdges, setNodes])
@@ -315,11 +428,40 @@ function PipelineEditorInner({ pipelineId }: { pipelineId: number }) {
     }
   }, [nodes, selectedNodeId])
 
+  useEffect(() => {
+    const valid = new Set(nodes.map((n) => n.id))
+    setGroupRefs((refs) =>
+      refs
+        .map((ref) => ({ ...ref, node_ids: (ref.node_ids ?? []).filter((id) => valid.has(id)) }))
+        .filter((ref) => (ref.node_ids?.length ?? 0) > 0),
+    )
+  }, [nodes])
+
+  const outdatedGroupRefs = useMemo(() => {
+    return groupRefs.filter((ref) => {
+      const current = pluginGroups.find((g) => g.id === ref.group_id)?.current_version_id
+      return current != null && current !== ref.group_version_id
+    })
+  }, [groupRefs, pluginGroups])
+
   const save = async () => {
-    const graph = flowToGraph(pipeName, nodes, edges)
+    const graph = flowToGraph(pipeName, nodes, edges, groupRefs)
     try {
       await api.updatePipeline(pipelineId, pipeName, graph, isDefault)
       setNotice({ kind: 'ok', text: '已保存' })
+    } catch (e) {
+      setNotice({ kind: 'err', text: String(e) })
+    }
+  }
+
+  const extractCurrentPipelineAsGroup = async () => {
+    const raw = window.prompt('输入要提取的插件组名称', `${pipeName}-group`)
+    const groupName = raw?.trim()
+    if (!groupName) return
+    try {
+      const group = await api.createPluginGroup(groupName, `从 pipeline「${pipeName}」提取`, flowToGraph(pipeName, nodes, edges, groupRefs))
+      setNotice({ kind: 'ok', text: `已提取为插件组「${group.name}」` })
+      setPluginGroups((prev) => [group, ...prev.filter((item) => item.id !== group.id)])
     } catch (e) {
       setNotice({ kind: 'err', text: String(e) })
     }
@@ -376,6 +518,10 @@ function PipelineEditorInner({ pipelineId }: { pipelineId: number }) {
           </Label>
         </div>
         <div className="ml-auto flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" onClick={extractCurrentPipelineAsGroup}>
+            <Boxes className="h-4 w-4" />
+            提取为组
+          </Button>
           <Button size="sm" variant="destructive" onClick={removeSelectedNode} disabled={!selectedNodeId}>
             <Trash2 className="h-4 w-4" />
             删除节点
@@ -404,13 +550,43 @@ function PipelineEditorInner({ pipelineId }: { pipelineId: number }) {
           {notice.text}
         </div>
       ) : null}
+      {outdatedGroupRefs.length > 0 ? (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
+          检测到 {outdatedGroupRefs.length} 个插件组引用不是最新版本，保存前可考虑重新拖入最新插件组或手动更新节点。
+        </div>
+      ) : null}
 
-      <div className="flex min-h-0 flex-1 gap-2">
-        <aside className="flex h-full min-h-0 w-56 shrink-0 flex-col overflow-hidden rounded-lg border bg-card">
-          <div className="border-b px-3 py-2 text-sm font-medium">插件库</div>
+      {/* 横向 flex 子项默认 min-height:auto，会按内容撑高侧栏导致无法内部滚动；须 min-h-0 + self-stretch */}
+      <div className="flex min-h-0 min-w-0 flex-1 items-stretch gap-2">
+        <aside className="flex min-h-0 w-56 shrink-0 grow-0 flex-col self-stretch overflow-hidden rounded-lg border bg-card">
+          <div className="shrink-0 border-b px-3 py-2 text-sm font-medium">插件库</div>
           <p className="shrink-0 px-3 py-1 text-xs text-muted-foreground">拖到画布添加节点；节点可在画布上拖动；连线连接输出→输入。</p>
-          <div className="min-h-0 flex-1 overflow-y-auto px-2">
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-2 [max-height:min(100%,calc(100vh-12rem))]">
             <div className="flex flex-col gap-3 pb-2 pr-2 pt-1">
+              {pluginGroups.length > 0 ? (
+                <div>
+                  <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">插件组</div>
+                  <div className="flex flex-col gap-1">
+                    {pluginGroups.map((group) => (
+                      <div
+                        key={group.id}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData(DND_GROUP_MIME, JSON.stringify({ group_id: group.id } satisfies GroupPalettePayload))
+                          e.dataTransfer.effectAllowed = 'copy'
+                        }}
+                        className="cursor-grab rounded-md border bg-secondary/20 px-2 py-1.5 text-sm shadow-sm active:cursor-grabbing hover:bg-accent/50"
+                      >
+                        <div className="font-medium">{group.name}</div>
+                        <div className="text-[10px] text-muted-foreground">
+                          {group.current_version || 'v1'} · {group.graph.nodes.length} 个节点
+                          {group.outdated_ref_count > 0 ? ` · ${group.outdated_ref_count} 条引用待更新` : ''}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               {grouped.map(([type, list]) => (
                 <div key={type}>
                   <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">{type}</div>
@@ -439,7 +615,7 @@ function PipelineEditorInner({ pipelineId }: { pipelineId: number }) {
           </div>
         </aside>
 
-        <div className="relative min-h-[min(420px,50vh)] min-w-0 flex-1 rounded-lg border bg-background">
+        <div className="relative min-h-[min(420px,50vh)] min-w-0 flex-1 self-stretch rounded-lg border bg-background">
           <div className="absolute inset-0 min-h-0">
             <FlowCanvas
               nodes={nodes}
@@ -447,9 +623,13 @@ function PipelineEditorInner({ pipelineId }: { pipelineId: number }) {
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
+              isValidConnection={isValidConnection}
               onNodeClick={(_, n) => setSelectedNodeId(n.id)}
               onPaneClick={() => setSelectedNodeId(null)}
               setNodes={setNodes}
+              setEdges={setEdges}
+              setGroupRefs={setGroupRefs}
+              groups={pluginGroups}
             />
           </div>
         </div>

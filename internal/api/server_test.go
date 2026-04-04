@@ -53,7 +53,7 @@ func testServer(t *testing.T) *api.Server {
 func TestTestPluginConfig_UnsupportedPluginReturns501(t *testing.T) {
 	srv := testServer(t)
 	h := srv.Handler()
-	req := httptest.NewRequest(http.MethodPost, "/api/plugins/rss/test", strings.NewReader(`{"config":{}}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/plugins/clean/test", strings.NewReader(`{"config":{}}`))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -111,6 +111,72 @@ func TestTestPluginConfig_FeishuOK(t *testing.T) {
 	}
 	if sup, _ := out["supported"].(bool); !sup {
 		t.Fatalf("supported want true got %#v", out)
+	}
+}
+
+func TestPluginQualityReport_IncludesGovernanceDetails(t *testing.T) {
+	t.Setenv("TRACKER_API_KEY", "quality-key")
+	srv := testServer(t)
+	h := srv.Handler()
+	req := httptest.NewRequest(http.MethodGet, "/api/plugins/quality-report", nil)
+	req.Header.Set("X-Tracker-Api-Key", "quality-key")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var rows []struct {
+		Name          string `json:"name"`
+		HasSchema     bool   `json:"has_schema"`
+		HasTester     bool   `json:"has_tester"`
+		NeedsTester   bool   `json:"needs_tester"`
+		HasPipelineIO bool   `json:"has_pipeline_io"`
+		Score         int    `json:"score"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("expected quality report rows")
+	}
+	lookup := make(map[string]struct {
+		HasSchema     bool
+		HasTester     bool
+		NeedsTester   bool
+		HasPipelineIO bool
+		Score         int
+	}, len(rows))
+	for _, row := range rows {
+		lookup[row.Name] = struct {
+			HasSchema     bool
+			HasTester     bool
+			NeedsTester   bool
+			HasPipelineIO bool
+			Score         int
+		}{
+			HasSchema:     row.HasSchema,
+			HasTester:     row.HasTester,
+			NeedsTester:   row.NeedsTester,
+			HasPipelineIO: row.HasPipelineIO,
+			Score:         row.Score,
+		}
+	}
+	openAI, ok := lookup["openai_summary"]
+	if !ok {
+		t.Fatal("missing openai_summary row")
+	}
+	if !openAI.HasSchema || !openAI.HasTester || !openAI.NeedsTester || !openAI.HasPipelineIO {
+		t.Fatalf("unexpected openai_summary governance row: %#v", openAI)
+	}
+	if openAI.Score < 90 {
+		t.Fatalf("unexpected openai_summary score: %#v", openAI)
+	}
+	clean, ok := lookup["clean"]
+	if !ok {
+		t.Fatal("missing clean row")
+	}
+	if clean.NeedsTester {
+		t.Fatalf("clean should not require tester: %#v", clean)
 	}
 }
 

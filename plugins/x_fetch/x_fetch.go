@@ -1,7 +1,9 @@
 package x_fetch
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -11,6 +13,7 @@ import (
 
 	"Tracker/internal/model"
 	"Tracker/internal/plugin"
+	"Tracker/plugins/sharedutil"
 )
 
 // Plugin uses X API v2 recent search (requires bearer token — set X_BEARER_TOKEN or stage config bearer_token).
@@ -22,33 +25,38 @@ func New() plugin.Plugin {
 	return &Plugin{client: &http.Client{Timeout: 30 * time.Second}}
 }
 
-func (p *Plugin) Name() string             { return "x_fetch" }
-func (p *Plugin) Version() string          { return "1.0" }
-func (p *Plugin) Type() plugin.Type        { return plugin.TypeSource }
+func (p *Plugin) Name() string                 { return "x_fetch" }
+func (p *Plugin) Version() string              { return "1.0" }
+func (p *Plugin) Type() plugin.Type            { return plugin.TypeSource }
 func (p *Plugin) Init(cfg plugin.Config) error { return nil }
 
-func (p *Plugin) ExecuteSource(cfg plugin.Config) ([]*model.Item, error) {
-	bearer := plugin.GetString(cfg, "bearer_token")
-	if bearer == "" {
-		bearer = os.Getenv("X_BEARER_TOKEN")
+// TestConfig validates bearer token access against the X recent search endpoint.
+func (p *Plugin) TestConfig(ctx context.Context, cfg plugin.Config) error {
+	req, err := p.newSearchRequest(ctx, cfg, 10)
+	if err != nil {
+		return err
 	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("x recent search: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func (p *Plugin) ExecuteSource(cfg plugin.Config) ([]*model.Item, error) {
+	bearer := sharedutil.StringWithEnv(cfg, "bearer_token", os.Getenv("X_BEARER_TOKEN"))
 	if bearer == "" {
 		return nil, &model.ItemError{Code: "x_auth", Message: "bearer_token or X_BEARER_TOKEN required (X API v2)"}
 	}
-	query := plugin.GetString(cfg, "query")
-	if query == "" {
-		query = "news -is:retweet lang:en"
-	}
-	max := plugin.GetString(cfg, "max_results")
-	if max == "" {
-		max = "10"
-	}
-	u := "https://api.twitter.com/2/tweets/search/recent?query=" + url.QueryEscape(query) + "&max_results=" + max + "&tweet.fields=created_at,author_id"
-	req, err := http.NewRequest(http.MethodGet, u, nil)
+	req, err := p.newSearchRequest(context.Background(), cfg, 0)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+bearer)
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -79,6 +87,28 @@ func (p *Plugin) ExecuteSource(cfg plugin.Config) ([]*model.Item, error) {
 		})
 	}
 	return items, nil
+}
+
+func (p *Plugin) newSearchRequest(ctx context.Context, cfg plugin.Config, defaultMax int) (*http.Request, error) {
+	bearer := sharedutil.StringWithEnv(cfg, "bearer_token", os.Getenv("X_BEARER_TOKEN"))
+	if bearer == "" {
+		return nil, fmt.Errorf("bearer_token is empty")
+	}
+	query := strings.TrimSpace(plugin.GetString(cfg, "query"))
+	if query == "" {
+		query = "news -is:retweet lang:en"
+	}
+	max := sharedutil.Int(cfg, "max_results", defaultMax)
+	if max <= 0 {
+		max = 10
+	}
+	u := "https://api.twitter.com/2/tweets/search/recent?query=" + url.QueryEscape(query) + "&max_results=" + fmt.Sprintf("%d", max) + "&tweet.fields=created_at,author_id"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	return req, nil
 }
 
 func truncate(s string, n int) string {

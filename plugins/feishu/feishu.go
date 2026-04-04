@@ -11,6 +11,7 @@ import (
 
 	"Tracker/internal/model"
 	"Tracker/internal/plugin"
+	"Tracker/plugins/sharedutil"
 )
 
 // Plugin implements Feishu (飞书/Lark) webhook dispatch.
@@ -23,27 +24,18 @@ func New() plugin.Plugin {
 	return &Plugin{}
 }
 
-func (p *Plugin) Name() string    { return "feishu" }
-func (p *Plugin) Version() string { return "1.0" }
+func (p *Plugin) Name() string      { return "feishu" }
+func (p *Plugin) Version() string   { return "1.0" }
 func (p *Plugin) Type() plugin.Type { return plugin.TypeDispatch }
 
 func (p *Plugin) Init(cfg plugin.Config) error {
-	p.webhookURL = plugin.GetString(cfg, "webhook_url")
-	if p.webhookURL == "" {
-		p.webhookURL = os.Getenv("FEISHU_WEBHOOK_URL")
-	}
+	p.webhookURL = sharedutil.StringWithEnv(cfg, "webhook_url", os.Getenv("FEISHU_WEBHOOK_URL"))
 	return nil
 }
 
 // TestConfig sends a minimal text message to verify the webhook URL (implements plugin.ConfigTester).
 func (p *Plugin) TestConfig(ctx context.Context, cfg plugin.Config) error {
-	url := plugin.GetString(cfg, "webhook_url")
-	if url == "" {
-		url = p.webhookURL
-	}
-	if url == "" {
-		url = os.Getenv("FEISHU_WEBHOOK_URL")
-	}
+	url := sharedutil.StringWithEnv(cfg, "webhook_url", p.webhookURL)
 	if url == "" {
 		return fmt.Errorf("webhook_url is empty (set in config or FEISHU_WEBHOOK_URL)")
 	}
@@ -91,15 +83,9 @@ func (p *Plugin) ExecuteDispatch(in *model.Item, cfg plugin.Config) error {
 	if in == nil {
 		return nil
 	}
-	url := plugin.GetString(cfg, "webhook_url")
+	url := sharedutil.StringWithEnv(cfg, "webhook_url", p.webhookURL)
 	if url == "" {
-		url = p.webhookURL
-	}
-	if url == "" {
-		url = os.Getenv("FEISHU_WEBHOOK_URL")
-	}
-	if url == "" {
-		return nil
+		return &model.ItemError{Code: "feishu_config", Message: "webhook_url is required"}
 	}
 	text := formatMessage(in)
 	body := map[string]interface{}{

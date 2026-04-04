@@ -1,6 +1,8 @@
 package news
 
 import (
+	"context"
+	"fmt"
 	"time"
 
 	"Tracker/internal/model"
@@ -37,13 +39,29 @@ func New() plugin.Plugin {
 	return &Plugin{}
 }
 
-func (p *Plugin) Name() string    { return "news" }
-func (p *Plugin) Version() string { return "1.0" }
+func (p *Plugin) Name() string      { return "news" }
+func (p *Plugin) Version() string   { return "1.0" }
 func (p *Plugin) Type() plugin.Type { return plugin.TypeSource }
 
 func (p *Plugin) Init(cfg plugin.Config) error {
 	p.feeds = buildFeeds(cfg)
 	return nil
+}
+
+// TestConfig validates that at least one configured or preset feed is reachable and parseable.
+func (p *Plugin) TestConfig(ctx context.Context, cfg plugin.Config) error {
+	feeds := buildFeeds(cfg)
+	if len(feeds) == 0 {
+		return fmt.Errorf("no news feeds configured")
+	}
+	parser := gofeed.NewParser()
+	for _, url := range feeds {
+		feed, err := parser.ParseURLWithContext(url, ctx)
+		if err == nil && feed != nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("failed to load all configured news feeds")
 }
 
 func buildFeeds(cfg plugin.Config) []string {
@@ -88,9 +106,11 @@ func (p *Plugin) ExecuteSource(cfg plugin.Config) ([]*model.Item, error) {
 	}
 	fp := gofeed.NewParser()
 	var items []*model.Item
+	failures := 0
 	for _, url := range feeds {
 		feed, err := fp.ParseURL(url)
 		if err != nil {
+			failures++
 			continue
 		}
 		for _, i := range feed.Items {
@@ -113,6 +133,9 @@ func (p *Plugin) ExecuteSource(cfg plugin.Config) ([]*model.Item, error) {
 				Metadata:  map[string]string{"feed_url": url},
 			})
 		}
+	}
+	if len(items) == 0 && failures == len(feeds) {
+		return nil, &model.ItemError{Code: "news_fetch_failed", Message: "failed to load all configured news feeds"}
 	}
 	return items, nil
 }

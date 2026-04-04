@@ -1,6 +1,7 @@
 package telegram_fetch
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 
 	"Tracker/internal/model"
 	"Tracker/internal/plugin"
+	"Tracker/plugins/sharedutil"
 )
 
 // Plugin pulls recent updates via Bot API getUpdates (bot must be member of groups/channels to see messages).
@@ -22,16 +24,35 @@ func New() plugin.Plugin {
 	return &Plugin{client: &http.Client{Timeout: 45 * time.Second}}
 }
 
-func (p *Plugin) Name() string             { return "telegram_fetch" }
-func (p *Plugin) Version() string          { return "1.0" }
-func (p *Plugin) Type() plugin.Type        { return plugin.TypeSource }
+func (p *Plugin) Name() string                 { return "telegram_fetch" }
+func (p *Plugin) Version() string              { return "1.0" }
+func (p *Plugin) Type() plugin.Type            { return plugin.TypeSource }
 func (p *Plugin) Init(cfg plugin.Config) error { return nil }
 
-func (p *Plugin) ExecuteSource(cfg plugin.Config) ([]*model.Item, error) {
-	token := plugin.GetString(cfg, "bot_token")
+// TestConfig validates the Telegram bot token with getMe.
+func (p *Plugin) TestConfig(ctx context.Context, cfg plugin.Config) error {
+	token := sharedutil.StringWithEnv(cfg, "bot_token", os.Getenv("TELEGRAM_BOT_TOKEN"))
 	if token == "" {
-		token = os.Getenv("TELEGRAM_BOT_TOKEN")
+		return fmt.Errorf("bot_token required")
 	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://api.telegram.org/bot%s/getMe", token), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("telegram getMe: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func (p *Plugin) ExecuteSource(cfg plugin.Config) ([]*model.Item, error) {
+	token := sharedutil.StringWithEnv(cfg, "bot_token", os.Getenv("TELEGRAM_BOT_TOKEN"))
 	if token == "" {
 		return nil, &model.ItemError{Code: "telegram_token", Message: "bot_token required"}
 	}

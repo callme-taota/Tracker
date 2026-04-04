@@ -14,6 +14,8 @@ Each built-in plugin registers a `plugin.Manifest` in `internal/plugins/registry
 | `config_schema` | JSON (light subset): `type: object`, `required`, etc., validates node `config` on save |
 | `input_schema` / `output_schema` | Reserved full JSON Schema; docs and future validation |
 | `input_formats` / `output_formats` | **Format tokens** (e.g. `tracker.item.v1`) for **edge IO checks** |
+| `pipeline_io` | Optional DAG semantics (see below); omitted fields are inferred from `kind` and formats |
+| `compatible_with` | If non-empty, only listed upstream plugin ids may connect to this node |
 | `validator_ref` | Optional named validator on the Hub |
 
 Plugins may implement `plugin.ManifestProvider`; built-ins use the central manifest table.
@@ -21,11 +23,21 @@ Plugins may implement `plugin.ManifestProvider`; built-ins use the central manif
 ## 2. Format tokens and edge validation
 
 - Default article payload: `tracker.item.v1` (maps to `model.Item`; see model for `extra`).
-- Empty `input_formats`: no upstream restriction.
-- Contains `"*"`: accept any upstream output.
-- Edge rule: overlap between upstream `output_formats` and downstream `input_formats`, or relaxed rules above.
+- **Item flow**: Edges represent item streams. Downstream must **accept** items (`accepts_items`, inferred: all kinds except `source`). Upstream must **emit** items (`emits_items`, inferred: `source` and `processor`/`summary`/`interest`; `dispatch` does not emit). Upstream must **allow outbound edges** (inferred: same as emits; sinks cannot chain further).
+- **Formats**: If downstream `input_formats` is non-empty and not only `"*"`, upstream must declare compatible `output_formats`; empty upstream output with a constrained downstream **fails** (strict pipeline edges).
+- Empty `input_formats`: no format restriction (still subject to accept/emit rules).
+- Contains `"*"`: accept any upstream output format.
 
-`PUT` and `POST /api/pipelines` call `Hub.ValidatePipelineGraph` before persist.
+### `pipeline_io` (optional JSON object)
+
+| Field | Meaning |
+|-------|---------|
+| `emits_items` | Override inferred “produces items for downstream”. |
+| `accepts_items` | Override inferred “consumes items from upstream”. |
+| `allow_outbound_edges` | Override whether edges **from** this node are allowed. |
+| `allow_no_incoming` | If true, a **non-source** node may have zero incoming success edges (bootstrap / self-scheduled side-effect). |
+
+`PUT` and `POST /api/pipelines` call `Hub.ValidatePipelineGraph` before persist. The pipeline editor uses `GET /api/plugins` fields `emits_items`, `accepts_items`, `allow_outbound_edges`, formats, and `compatible_with` for live connection checks.
 
 ## 3. PluginHub lifecycle
 

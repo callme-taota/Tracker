@@ -8,6 +8,9 @@ import Summaries from '@/pages/Summaries'
 import Interests from '@/pages/Interests'
 import Plugins from '@/pages/Plugins'
 import PluginConfigPage from '@/pages/PluginConfigPage'
+import PluginPackages from '@/pages/PluginPackages'
+import PluginWorkbench from '@/pages/PluginWorkbench'
+import PluginGroups from '@/pages/PluginGroups'
 import PipelineEditor from '@/pages/PipelineEditor'
 import Pipelines from '@/pages/Pipelines'
 
@@ -25,6 +28,9 @@ export default function App() {
         <Route path="/interests" element={<Interests />} />
         <Route path="/plugins" element={<Plugins />} />
         <Route path="/plugins/:pluginId" element={<PluginConfigPage />} />
+        <Route path="/plugin-packages" element={<PluginPackages />} />
+        <Route path="/plugin-packages/:id" element={<PluginWorkbench />} />
+        <Route path="/plugin-groups" element={<PluginGroups />} />
         <Route path="*" element={<Navigate to="/pipelines" replace />} />
       </Route>
     </Routes>

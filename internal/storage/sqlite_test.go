@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -52,20 +51,12 @@ func TestJobsTableHasClaimColumnsAfterMigrate(t *testing.T) {
 	}
 	defer db.Close()
 	var names []string
-	rows, err := db.conn.Query(`SELECT name FROM pragma_table_info('jobs')`)
+	cols, err := db.orm.Migrator().ColumnTypes(&ormJob{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var n string
-		if err := rows.Scan(&n); err != nil {
-			t.Fatal(err)
-		}
-		names = append(names, n)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
+	for _, col := range cols {
+		names = append(names, col.Name())
 	}
 	has := func(want string) bool {
 		for _, n := range names {
@@ -83,18 +74,15 @@ func TestJobsTableHasClaimColumnsAfterMigrate(t *testing.T) {
 func TestMigrateIdempotentOnFreshDB(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "idempotent.db")
-	conn, err := sql.Open("sqlite", path)
+	db, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
-	if _, err := conn.Exec(schemaSQL); err != nil {
+	defer db.Close()
+	if err := migrate(db.orm); err != nil {
 		t.Fatal(err)
 	}
-	if err := migrate(conn); err != nil {
-		t.Fatal(err)
-	}
-	if err := migrate(conn); err != nil {
+	if err := migrate(db.orm); err != nil {
 		t.Fatalf("second migrate: %v", err)
 	}
 }

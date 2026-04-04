@@ -2,14 +2,14 @@ package storage
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net"
 	"os"
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	gsqlite "github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 )
 
 // Router holds optional storage backends. SQLite uses the already-vendored modernc driver.
@@ -17,12 +17,12 @@ import (
 // clients can be added via `go get` + thin wrappers (see docs/en/CORE_SERVICES.md).
 type Router struct {
 	// SQLiteCore optional second DB for plugin key-value / dedup (separate from app data.db).
-	SQLiteCore *sql.DB
+	SQLiteCore *gorm.DB
 
-	MySQLDSN    string
-	MongoURI    string
-	MongoDBName string
-	RedisAddr   string
+	MySQLDSN     string
+	MongoURI     string
+	MongoDBName  string
+	RedisAddr    string
 	KafkaBrokers []string
 }
 
@@ -34,10 +34,10 @@ type Router struct {
 //   - TRACKER_KAFKA_BROKERS (comma-separated)
 func NewRouterFromEnv() *Router {
 	r := &Router{
-		MySQLDSN:      strings.TrimSpace(os.Getenv("TRACKER_MYSQL_DSN")),
-		MongoURI:      strings.TrimSpace(os.Getenv("TRACKER_MONGO_URI")),
-		MongoDBName:   strings.TrimSpace(os.Getenv("TRACKER_MONGO_DATABASE")),
-		RedisAddr:     strings.TrimSpace(os.Getenv("TRACKER_REDIS_ADDR")),
+		MySQLDSN:    strings.TrimSpace(os.Getenv("TRACKER_MYSQL_DSN")),
+		MongoURI:    strings.TrimSpace(os.Getenv("TRACKER_MONGO_URI")),
+		MongoDBName: strings.TrimSpace(os.Getenv("TRACKER_MONGO_DATABASE")),
+		RedisAddr:   strings.TrimSpace(os.Getenv("TRACKER_REDIS_ADDR")),
 	}
 	if r.MongoDBName == "" {
 		r.MongoDBName = "tracker"
@@ -51,10 +51,13 @@ func NewRouterFromEnv() *Router {
 		}
 	}
 	if path := strings.TrimSpace(os.Getenv("TRACKER_CORE_SQLITE")); path != "" {
-		db, err := sql.Open("sqlite", path)
+		db, err := gorm.Open(gsqlite.Open(path), &gorm.Config{})
 		if err == nil {
-			db.SetMaxOpenConns(8)
-			r.SQLiteCore = db
+			sqlDB, sqlErr := db.DB()
+			if sqlErr == nil {
+				sqlDB.SetMaxOpenConns(8)
+				r.SQLiteCore = db
+			}
 		}
 	}
 	return r
@@ -65,7 +68,11 @@ func (r *Router) Close() error {
 	if r == nil || r.SQLiteCore == nil {
 		return nil
 	}
-	return r.SQLiteCore.Close()
+	sqlDB, err := r.SQLiteCore.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
 }
 
 // Ping runs best-effort checks: SQLite ping, TCP dial for redis/mongo/mysql/kafka endpoints.
@@ -75,7 +82,12 @@ func (r *Router) Ping(ctx context.Context) map[string]error {
 		return out
 	}
 	if r.SQLiteCore != nil {
-		out["sqlite_core"] = r.SQLiteCore.PingContext(ctx)
+		sqlDB, err := r.SQLiteCore.DB()
+		if err != nil {
+			out["sqlite_core"] = err
+		} else {
+			out["sqlite_core"] = sqlDB.PingContext(ctx)
+		}
 	}
 	if r.MySQLDSN != "" {
 		addr := dsnHostPort(r.MySQLDSN, "3306")

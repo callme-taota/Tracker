@@ -18,6 +18,7 @@ type Manifest struct {
 	OutputFormats  []string        `json:"output_formats,omitempty"`
 	CompatibleWith []string        `json:"compatible_with,omitempty"` // explicit upstream plugin ids
 	ValidatorRef   string          `json:"validator_ref,omitempty"`
+	PipelineIO     *PipelineIOSpec `json:"pipeline_io,omitempty"`
 }
 
 // ManifestProvider is implemented by plugins that supply a static manifest.

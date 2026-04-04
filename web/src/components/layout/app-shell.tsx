@@ -3,7 +3,6 @@ import { ChevronDown, LayoutDashboard, Network, Plug } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
-import { useState } from 'react'
 
 const primaryNav = [{ to: '/pipelines', label: '管道', icon: Network }]
 
@@ -22,7 +21,6 @@ const toolsNav = [
 
 export function AppShell() {
   const loc = useLocation()
-  const [dataOpen, setDataOpen] = useState(true)
   const isEditor = !!matchPath('/pipelines/:id', loc.pathname)
 
   return (
@@ -41,26 +39,34 @@ export function AppShell() {
               </Link>
             </Button>
           ))}
-          <div className="relative">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-1"
-              onClick={() => setDataOpen((o) => !o)}
-              aria-expanded={dataOpen}
-            >
+          {/* 默认收起；悬浮展开。pt-1 作为热区桥接，避免从按钮移到菜单时闪关 */}
+          <div className="group relative">
+            <Button variant="ghost" size="sm" className="gap-1" type="button" aria-haspopup="true">
               数据
-              <ChevronDown className={cn('h-4 w-4 transition-transform', dataOpen && 'rotate-180')} />
+              <ChevronDown
+                className={cn(
+                  'h-4 w-4 transition-transform duration-150',
+                  'group-hover:rotate-180 group-focus-within:rotate-180',
+                )}
+              />
             </Button>
-            {dataOpen ? (
-              <div className="absolute left-0 top-full z-50 mt-1 min-w-[10rem] rounded-md border bg-popover p-1 shadow-md">
+            <div
+              className={cn(
+                'pointer-events-none invisible absolute left-0 top-full z-50 pt-1 opacity-0 transition-opacity duration-150',
+                'group-hover:pointer-events-auto group-hover:visible group-hover:opacity-100',
+                'group-focus-within:pointer-events-auto group-focus-within:visible group-focus-within:opacity-100',
+              )}
+            >
+              <div className="min-w-[10rem] rounded-md border bg-popover p-1 shadow-md" role="menu">
                 {dataNav.map(({ to, label }) => (
                   <Button key={to} variant="ghost" size="sm" className="w-full justify-start font-normal" asChild>
-                    <Link to={to}>{label}</Link>
+                    <Link to={to} role="menuitem">
+                      {label}
+                    </Link>
                   </Button>
                 ))}
               </div>
-            ) : null}
+            </div>
           </div>
           <Separator orientation="vertical" className="mx-1 hidden h-6 sm:block" />
           {toolsNav.map((item) => {

@@ -8,12 +8,13 @@ import (
 
 	"Tracker/internal/model"
 	"Tracker/internal/plugin"
+	"Tracker/plugins/sharedutil"
 )
 
 // Plugin drops near-duplicate content using 64-bit simhash + Hamming threshold.
 type Plugin struct {
-	mu       sync.Mutex
-	hashes   []uint64
+	mu        sync.Mutex
+	hashes    []uint64
 	threshold int
 }
 
@@ -21,12 +22,12 @@ func New() plugin.Plugin {
 	return &Plugin{threshold: 3}
 }
 
-func (p *Plugin) Name() string             { return "simhash_dedup" }
-func (p *Plugin) Version() string          { return "1.0" }
-func (p *Plugin) Type() plugin.Type        { return plugin.TypeProcessor }
+func (p *Plugin) Name() string      { return "simhash_dedup" }
+func (p *Plugin) Version() string   { return "1.0" }
+func (p *Plugin) Type() plugin.Type { return plugin.TypeProcessor }
 func (p *Plugin) Init(cfg plugin.Config) error {
-	if plugin.GetString(cfg, "hamming_threshold") == "4" {
-		p.threshold = 4
+	if threshold := sharedutil.Int(cfg, "hamming_threshold", p.threshold); threshold > 0 {
+		p.threshold = threshold
 	}
 	return nil
 }
@@ -36,10 +37,14 @@ func (p *Plugin) Execute(in *model.Item, cfg plugin.Config) (*model.Item, error)
 		return nil, nil
 	}
 	h := simhash64(in.Title + "\n" + in.Content)
+	threshold := sharedutil.Int(cfg, "hamming_threshold", p.threshold)
+	if threshold <= 0 {
+		threshold = p.threshold
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, prev := range p.hashes {
-		if hamming(prev, h) <= uint32(p.threshold) {
+		if hamming(prev, h) <= uint32(threshold) {
 			return nil, nil
 		}
 	}

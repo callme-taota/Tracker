@@ -140,9 +140,43 @@ func (h *Hub) Emit(rt *RuntimeContext, ev Event) {
 	}
 }
 
+func validatePipelineEdge(ms, mt plugin.Manifest) error {
+	if !mt.InferredAcceptsItems() {
+		return fmt.Errorf("target plugin %q does not accept upstream item flow", mt.ID)
+	}
+	if !ms.InferredEmitsItems() {
+		return fmt.Errorf("source plugin %q does not emit items downstream", ms.ID)
+	}
+	if !ms.InferredAllowOutboundEdges() {
+		return fmt.Errorf("source plugin %q must not have outbound pipeline edges", ms.ID)
+	}
+	if !EdgeFormatsCompatible(ms.OutputFormats, mt.InputFormats) {
+		return fmt.Errorf("output formats %v incompatible with input formats %v", ms.OutputFormats, mt.InputFormats)
+	}
+	if len(mt.CompatibleWith) > 0 {
+		ok := false
+		for _, id := range mt.CompatibleWith {
+			if id == ms.ID {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return fmt.Errorf("target %q only accepts upstream plugin ids %v, got %q", mt.ID, mt.CompatibleWith, ms.ID)
+		}
+	}
+	return nil
+}
+
 // ValidatePipelineGraph checks DAG structure, per-node config schema (lightweight), format compatibility on edges, and optional validators.
 func (h *Hub) ValidatePipelineGraph(g *pipeline.PipelineGraph) error {
-	if err := g.Validate(); err != nil {
+	opts := pipeline.GraphValidateOptions{
+		AllowNoIncomingForPlugin: func(pluginID string) bool {
+			m, ok := h.Manifest(pluginID)
+			return ok && m.AllowNoIncomingEdge()
+		},
+	}
+	if err := g.ValidateWithOptions(opts); err != nil {
 		return err
 	}
 	nodes := g.NodeByID()
@@ -172,9 +206,8 @@ func (h *Hub) ValidatePipelineGraph(g *pipeline.PipelineGraph) error {
 		if !okS || !okT {
 			continue
 		}
-		if !FormatsCompatible(ms.OutputFormats, mt.InputFormats) {
-			return fmt.Errorf("pluginhub: edge %s -> %s: output formats %v incompatible with input formats %v",
-				e.Source, e.Target, ms.OutputFormats, mt.InputFormats)
+		if err := validatePipelineEdge(ms, mt); err != nil {
+			return fmt.Errorf("pluginhub: edge %s -> %s: %w", e.Source, e.Target, err)
 		}
 	}
 	return nil

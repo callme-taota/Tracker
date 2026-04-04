@@ -1,19 +1,22 @@
 package storage
 
 import (
-	"database/sql"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // PipelineDefinition is a persisted DAG pipeline (graph_json = PipelineGraph JSON).
 type PipelineDefinition struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	GraphJSON string    `json:"graph_json"`
-	IsDefault bool      `json:"is_default"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        int64     `json:"id" gorm:"column:id;primaryKey;autoIncrement"`
+	Name      string    `json:"name" gorm:"column:name;not null"`
+	GraphJSON string    `json:"graph_json" gorm:"column:graph_json;not null"`
+	IsDefault bool      `json:"is_default" gorm:"column:is_default;not null;default:false;index:idx_pipeline_definitions_default"`
+	CreatedAt time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"column:updated_at;autoCreateTime;autoUpdateTime"`
 }
+
+func (PipelineDefinition) TableName() string { return "pipeline_definitions" }
 
 // PipelineSummary for list API (no full graph).
 type PipelineSummary struct {
@@ -25,124 +28,85 @@ type PipelineSummary struct {
 
 // ListPipelineDefinitions returns all pipelines ordered by id.
 func (db *DB) ListPipelineDefinitions() ([]PipelineSummary, error) {
-	rows, err := db.conn.Query(`
-		SELECT id, name, is_default, updated_at FROM pipeline_definitions ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	var list []PipelineSummary
-	for rows.Next() {
-		var s PipelineSummary
-		var def int
-		if err := rows.Scan(&s.ID, &s.Name, &def, &s.UpdatedAt); err != nil {
-			return nil, err
-		}
-		s.IsDefault = def != 0
-		list = append(list, s)
-	}
-	return list, rows.Err()
+	err := db.orm.Model(&PipelineDefinition{}).
+		Select("id, name, is_default, updated_at").
+		Order("id").
+		Scan(&list).Error
+	return list, err
 }
 
 // GetPipelineDefinition loads one pipeline by id.
 func (db *DB) GetPipelineDefinition(id int64) (*PipelineDefinition, error) {
-	var p PipelineDefinition
-	var def int
-	err := db.conn.QueryRow(`
-		SELECT id, name, graph_json, is_default, created_at, updated_at
-		FROM pipeline_definitions WHERE id = ?`, id,
-	).Scan(&p.ID, &p.Name, &p.GraphJSON, &def, &p.CreatedAt, &p.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
+	var row PipelineDefinition
+	err := db.orm.First(&row, id).Error
 	if err != nil {
+		if isNotFound(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
-	p.IsDefault = def != 0
-	return &p, nil
+	return &row, nil
 }
 
 // GetDefaultPipelineDefinition returns the row marked default, if any.
 func (db *DB) GetDefaultPipelineDefinition() (*PipelineDefinition, error) {
-	var p PipelineDefinition
-	var def int
-	err := db.conn.QueryRow(`
-		SELECT id, name, graph_json, is_default, created_at, updated_at
-		FROM pipeline_definitions WHERE is_default = 1 ORDER BY id LIMIT 1`,
-	).Scan(&p.ID, &p.Name, &p.GraphJSON, &def, &p.CreatedAt, &p.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
+	var row PipelineDefinition
+	err := db.orm.Where("is_default = ?", true).Order("id").First(&row).Error
 	if err != nil {
+		if isNotFound(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
-	p.IsDefault = def != 0
-	return &p, nil
+	return &row, nil
 }
 
-func (db *DB) clearDefaultPipelineFlag(tx *sql.Tx) error {
-	_, err := tx.Exec(`UPDATE pipeline_definitions SET is_default = 0, updated_at = CURRENT_TIMESTAMP`)
-	return err
+func clearDefaultPipelineFlag(tx *DB) error {
+	return tx.orm.Model(&PipelineDefinition{}).
+		Where("is_default = ?", true).
+		Update("is_default", false).Error
 }
 
 // CreatePipelineDefinition inserts a pipeline. If isDefault, clears other defaults.
 func (db *DB) CreatePipelineDefinition(name, graphJSON string, isDefault bool) (int64, error) {
-	tx, err := db.conn.Begin()
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if isDefault {
-		if err := db.clearDefaultPipelineFlag(tx); err != nil {
-			return 0, err
+	var created PipelineDefinition
+	err := db.orm.Transaction(func(tx *gorm.DB) error {
+		w := &DB{orm: tx}
+		if isDefault {
+			if err := clearDefaultPipelineFlag(w); err != nil {
+				return err
+			}
 		}
-	}
-	def := 0
-	if isDefault {
-		def = 1
-	}
-	res, err := tx.Exec(`
-		INSERT INTO pipeline_definitions (name, graph_json, is_default, updated_at)
-		VALUES (?, ?, ?, CURRENT_TIMESTAMP)`, name, graphJSON, def)
+		created = PipelineDefinition{Name: name, GraphJSON: graphJSON, IsDefault: isDefault}
+		return tx.Create(&created).Error
+	})
 	if err != nil {
 		return 0, err
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return 0, err
-	}
-	return id, tx.Commit()
+	return created.ID, nil
 }
 
 // UpdatePipelineDefinition updates name/graph/is_default.
 func (db *DB) UpdatePipelineDefinition(id int64, name, graphJSON string, isDefault bool) error {
-	tx, err := db.conn.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if isDefault {
-		if err := db.clearDefaultPipelineFlag(tx); err != nil {
-			return err
+	return db.orm.Transaction(func(tx *gorm.DB) error {
+		w := &DB{orm: tx}
+		if isDefault {
+			if err := clearDefaultPipelineFlag(w); err != nil {
+				return err
+			}
 		}
-	}
-	def := 0
-	if isDefault {
-		def = 1
-	}
-	_, err = tx.Exec(`
-		UPDATE pipeline_definitions SET name = ?, graph_json = ?, is_default = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?`, name, graphJSON, def, id)
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
+		return tx.Model(&PipelineDefinition{}).
+			Where("id = ?", id).
+			Updates(map[string]interface{}{
+				"name":       name,
+				"graph_json": graphJSON,
+				"is_default": isDefault,
+			}).Error
+	})
 }
 
 // DeletePipelineDefinition removes a pipeline by id.
 func (db *DB) DeletePipelineDefinition(id int64) error {
-	_, err := db.conn.Exec(`DELETE FROM pipeline_definitions WHERE id = ?`, id)
-	return err
+	return db.orm.Delete(&PipelineDefinition{}, id).Error
 }

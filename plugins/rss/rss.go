@@ -1,6 +1,8 @@
 package rss
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -21,8 +23,8 @@ func New() plugin.Plugin {
 	return &Plugin{}
 }
 
-func (p *Plugin) Name() string   { return "rss" }
-func (p *Plugin) Version() string { return "1.0" }
+func (p *Plugin) Name() string      { return "rss" }
+func (p *Plugin) Version() string   { return "1.0" }
 func (p *Plugin) Type() plugin.Type { return plugin.TypeSource }
 
 func (p *Plugin) Init(cfg plugin.Config) error {
@@ -30,6 +32,33 @@ func (p *Plugin) Init(cfg plugin.Config) error {
 	p.feeds = plugin.GetStringSlice(cfg, "feeds")
 	p.userAgent = plugin.GetString(cfg, "user_agent")
 	return nil
+}
+
+// TestConfig validates that at least one configured RSS feed is reachable.
+func (p *Plugin) TestConfig(ctx context.Context, cfg plugin.Config) error {
+	feeds := plugin.GetStringSlice(cfg, "feeds")
+	if len(feeds) == 0 {
+		feeds = p.feeds
+	}
+	if len(feeds) == 0 {
+		return fmt.Errorf("no RSS feeds configured")
+	}
+	parser := gofeed.NewParser()
+	ua := plugin.GetString(cfg, "user_agent")
+	if ua == "" {
+		ua = p.userAgent
+	}
+	if ua == "" {
+		ua = "Tracker-RSS/1.0"
+	}
+	parser.UserAgent = ua
+	for _, url := range feeds {
+		feed, err := parser.ParseURLWithContext(url, ctx)
+		if err == nil && feed != nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("failed to load all configured RSS feeds")
 }
 
 // ExecuteSource fetches items from RSS feeds. cfg["feeds"] overrides Init feeds.
@@ -51,9 +80,11 @@ func (p *Plugin) ExecuteSource(cfg plugin.Config) ([]*model.Item, error) {
 	}
 	fp.UserAgent = ua
 	var items []*model.Item
+	failures := 0
 	for _, url := range feeds {
 		feed, err := fp.ParseURL(url)
 		if err != nil {
+			failures++
 			continue
 		}
 		for _, i := range feed.Items {
@@ -76,6 +107,9 @@ func (p *Plugin) ExecuteSource(cfg plugin.Config) ([]*model.Item, error) {
 				Metadata:  map[string]string{"feed_url": url},
 			})
 		}
+	}
+	if len(items) == 0 && failures == len(feeds) {
+		return nil, &model.ItemError{Code: "rss_fetch_failed", Message: "failed to load all configured RSS feeds"}
 	}
 	return filterByTimeWindow(items, cfg), nil
 }

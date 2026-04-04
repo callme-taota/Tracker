@@ -15,11 +15,11 @@ type Position struct {
 
 // GraphNode is one node in the pipeline DAG.
 type GraphNode struct {
-	ID       string         `json:"id"`
-	Type     plugin.Type    `json:"plugin_type"`
-	PluginID string         `json:"plugin_id"`
-	Config   plugin.Config  `json:"config,omitempty"`
-	Position Position       `json:"position,omitempty"`
+	ID       string        `json:"id"`
+	Type     plugin.Type   `json:"plugin_type"`
+	PluginID string        `json:"plugin_id"`
+	Config   plugin.Config `json:"config,omitempty"`
+	Position Position      `json:"position,omitempty"`
 }
 
 // GraphEdge connects two nodes (optional handles for multi-port future).
@@ -33,11 +33,27 @@ type GraphEdge struct {
 	OnCondition  string `json:"on_condition,omitempty"`
 }
 
+// GraphGroupRef keeps the source plugin-group version for expanded nodes in a pipeline.
+type GraphGroupRef struct {
+	GroupID        int64    `json:"group_id"`
+	GroupName      string   `json:"group_name,omitempty"`
+	GroupVersionID int64    `json:"group_version_id"`
+	GroupVersion   string   `json:"group_version,omitempty"`
+	NodeIDs        []string `json:"node_ids,omitempty"`
+}
+
 // PipelineGraph is a DAG of plugin nodes; dynamic pipeline definition.
 type PipelineGraph struct {
-	Name  string      `json:"name"`
-	Nodes []GraphNode `json:"nodes"`
-	Edges []GraphEdge `json:"edges"`
+	Name      string          `json:"name"`
+	Nodes     []GraphNode     `json:"nodes"`
+	Edges     []GraphEdge     `json:"edges"`
+	GroupRefs []GraphGroupRef `json:"group_refs,omitempty"`
+}
+
+// GraphValidateOptions tweaks structural validation (e.g. manifest-driven bootstrap nodes).
+type GraphValidateOptions struct {
+	// AllowNoIncomingForPlugin, if set, returns true when a non-source node may have no incoming success edges.
+	AllowNoIncomingForPlugin func(pluginID string) bool
 }
 
 // LinearToGraph converts legacy linear Pipeline to a left-to-right chain graph.
@@ -91,6 +107,11 @@ func (g *PipelineGraph) NodeByID() map[string]GraphNode {
 
 // Validate checks basic DAG rules.
 func (g *PipelineGraph) Validate() error {
+	return g.ValidateWithOptions(GraphValidateOptions{})
+}
+
+// ValidateWithOptions checks basic DAG rules with optional manifest hooks.
+func (g *PipelineGraph) ValidateWithOptions(opts GraphValidateOptions) error {
 	if len(g.Nodes) == 0 {
 		return fmt.Errorf("pipeline graph: no nodes")
 	}
@@ -121,7 +142,9 @@ func (g *PipelineGraph) Validate() error {
 			continue
 		}
 		if len(g.SuccessPredecessors(n.ID)) == 0 {
-			return fmt.Errorf("pipeline graph: non-source node %q must have an incoming success edge (on_success or default)", n.ID)
+			if opts.AllowNoIncomingForPlugin == nil || !opts.AllowNoIncomingForPlugin(n.PluginID) {
+				return fmt.Errorf("pipeline graph: non-source node %q must have an incoming success edge (on_success or default)", n.ID)
+			}
 		}
 	}
 	return nil
