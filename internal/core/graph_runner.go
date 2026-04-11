@@ -25,6 +25,22 @@ func mergeSourceConfig(base plugin.Config, payload map[string]interface{}) plugi
 	return out
 }
 
+func mergeNodeRuntimeConfig(base plugin.Config, payload map[string]interface{}) plugin.Config {
+	if len(payload) == 0 {
+		return base
+	}
+	runtimeMeta, ok := payload[TrackerRuntimeKey]
+	if !ok {
+		return base
+	}
+	out := make(plugin.Config)
+	for k, v := range base {
+		out[k] = v
+	}
+	out[TrackerRuntimeKey] = runtimeMeta
+	return out
+}
+
 // GraphRunner executes a PipelineGraph (DAG) in topological order.
 type GraphRunner struct {
 	agent *AgentRunner
@@ -88,7 +104,7 @@ func (gr *GraphRunner) RunWithContext(ctx context.Context, pipelineID int64, g *
 
 		switch n.Type {
 		case plugin.TypeSource:
-			srcCfg := mergeSourceConfig(n.Config, payload)
+			srcCfg := mergeNodeRuntimeConfig(mergeSourceConfig(n.Config, payload), payload)
 			items, err := gr.agent.RunSource(n.PluginID, srcCfg)
 			if err != nil {
 				if gr.hub != nil {
@@ -106,13 +122,14 @@ func (gr *GraphRunner) RunWithContext(ctx context.Context, pipelineID int64, g *
 			}
 
 		case plugin.TypeProcessor, plugin.TypeSummary, plugin.TypeInterest:
+			nodeCfg := mergeNodeRuntimeConfig(n.Config, payload)
 			var inputs []*model.Item
 			for _, pid := range preds {
 				inputs = append(inputs, outMap[pid]...)
 			}
 			var next []*model.Item
 			for _, it := range inputs {
-				o, err := gr.agent.RunProcess(n.PluginID, it, n.Config)
+				o, err := gr.agent.RunProcess(n.PluginID, it, nodeCfg)
 				if err != nil {
 					if gr.hub != nil {
 						gr.hub.Emit(rt, pluginhub.Event{Type: pluginhub.ErrorEvent, RunID: runID, PipelineID: pipelineID, NodeID: nid, PluginID: n.PluginID, Err: err})
@@ -130,12 +147,13 @@ func (gr *GraphRunner) RunWithContext(ctx context.Context, pipelineID int64, g *
 			}
 
 		case plugin.TypeDispatch:
+			nodeCfg := mergeNodeRuntimeConfig(n.Config, payload)
 			var inputs []*model.Item
 			for _, pid := range preds {
 				inputs = append(inputs, outMap[pid]...)
 			}
 			for _, it := range inputs {
-				if err := gr.agent.RunDispatch(n.PluginID, it, n.Config); err != nil {
+				if err := gr.agent.RunDispatch(n.PluginID, it, nodeCfg); err != nil {
 					if gr.hub != nil {
 						gr.hub.Emit(rt, pluginhub.Event{Type: pluginhub.ErrorEvent, RunID: runID, PipelineID: pipelineID, NodeID: nid, PluginID: n.PluginID, Err: err})
 					}

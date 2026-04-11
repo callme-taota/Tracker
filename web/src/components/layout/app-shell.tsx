@@ -2,7 +2,9 @@ import { Link, Outlet, useLocation, matchPath } from 'react-router-dom'
 import { ChevronDown, LayoutDashboard, Network, Plug } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { useFeatureFlags } from '@/lib/feature-flags'
 
 const primaryNav = [{ to: '/pipelines', label: '管道', icon: Network }]
 
@@ -22,6 +24,8 @@ const toolsNav = [
 export function AppShell() {
   const loc = useLocation()
   const isEditor = !!matchPath('/pipelines/:id', loc.pathname)
+  const { snapshot, variant } = useFeatureFlags()
+  const showRuntimeExperiment = variant('web.runtime_experiments') === 'on'
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -29,6 +33,11 @@ export function AppShell() {
         <Link to="/pipelines" className="text-lg font-semibold tracking-tight">
           Tracker
         </Link>
+        {showRuntimeExperiment ? (
+          <Badge variant="secondary" className="hidden sm:inline-flex">
+            实验中 {snapshot?.release.channel ?? 'stable'}/{snapshot?.release.ring ?? 'global'}
+          </Badge>
+        ) : null}
         <Separator orientation="vertical" className="h-6" />
         <nav className="flex flex-1 flex-wrap items-center gap-1">
           {primaryNav.map(({ to, label, icon: Icon }) => (

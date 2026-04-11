@@ -16,6 +16,12 @@ The root `Dockerfile` is multi-stage: build `web/dist`, then compile `cmd/tracke
 - Set **`TRACKER_INSTANCE_ID`** per process (stable string, e.g. Kubernetes pod name). When a job moves from `pending` to `running`, `jobs.claimed_by` and `jobs.claimed_at` are set for troubleshooting.
 - **`ClaimNextPendingJob`** uses “pick id, then `UPDATE ... WHERE id=? AND status='pending'`” so only one concurrent claim succeeds against the same row.
 
+## Release metadata and feature flags
+
+- Recommended release envs: `TRACKER_RELEASE_CHANNEL`, `TRACKER_RELEASE_RING`, `TRACKER_RELEASE_VERSION`, `TRACKER_RELEASE_INSTANCE`.
+- Emergency override env: `TRACKER_FLAG_OVERRIDES` (for example `runtime.executor_v2=legacy`).
+- For rollout policy and rollback steps, see [ROLLOUT_AB.md](ROLLOUT_AB.md) and [OPERATIONS_SOP.md](OPERATIONS_SOP.md).
+
 ## Connection pools
 
 - SQLite: `internal/storage/sqlite.go` sets `SetMaxOpenConns` / `SetMaxIdleConns` after `Open` (conservative; multiple writers to one file still hit SQLite locking).

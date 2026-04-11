@@ -1,8 +1,8 @@
 package pluginhub
 
-// FormatsCompatible returns true if upstream outputs can feed downstream inputs.
-// Empty output is treated as permissive (legacy; pipeline edges use EdgeFormatsCompatible).
-// "*" in input accepts any.
+// Deprecated: FormatsCompatible keeps the pre-DAG permissive semantics.
+// New code should use EdgeFormatsCompatible and keep this helper behind the
+// runtime.legacy_formats_compat feature flag until legacy callers are removed.
 func FormatsCompatible(outputFormats, inputFormats []string) bool {
 	if len(inputFormats) == 0 {
 		return true

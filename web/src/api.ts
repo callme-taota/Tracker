@@ -134,6 +134,20 @@ export type PluginQualityRow = {
   needs_tester?: boolean
   has_pipeline_io?: boolean
 }
+export type FeatureFlagResolved = {
+  key: string
+  variant: string
+  description?: string
+  reason?: string
+  expose_to_web?: boolean
+  deprecated?: boolean
+}
+export type FeatureFlagSnapshot = {
+  release: { channel: string; ring: string; version?: string; instance?: string }
+  subject_id: string
+  generated_at: string
+  flags: Record<string, FeatureFlagResolved>
+}
 export type Stage = { name: string; plugin_id: string; type: string }
 export type GraphNodeDTO = {
   id: string
@@ -271,6 +285,7 @@ export const api = {
   addInterest: (name: string, keywords: string, config?: string) => post<{ id: number }>('/api/interests', { name, keywords, config: config || '' }),
   deleteInterest: (id: number) => del(`/api/interests/${id}`),
   getPlugins: () => get<Plugin[]>('/api/plugins'),
+  getFeatureFlagSnapshot: () => get<FeatureFlagSnapshot>('/api/feature-flags/snapshot'),
   getPluginQualityReport: () => get<PluginQualityRow[]>('/api/plugins/quality-report'),
   listPluginPackages: () => get<PluginPackage[]>('/api/plugin-packages'),
   createPluginPackage: (body: PluginImportRequest) => post<PluginPackageDetail & { review: ReviewReport }>('/api/plugin-packages', body),

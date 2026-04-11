@@ -12,10 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"Tracker/internal/config"
 	"Tracker/internal/core"
-	"Tracker/internal/model"
 	"Tracker/internal/pipeline"
 	"Tracker/internal/plugin"
+	"Tracker/internal/runtimeflow"
 	"Tracker/internal/storage"
 	"Tracker/plugins/llm_operator"
 )
@@ -24,12 +25,14 @@ import (
 type Server struct {
 	Engine     *core.Engine
 	DB         *storage.DB
+	App        config.App
 	ConfigPath string
+	Executor   *runtimeflow.Executor
 	useFS      fs.FS // optional: serve SPA from this FS (e.g. web/dist)
 }
 
 // NewServer creates an API server. DB may be nil. staticFS is optional (e.g. os.DirFS("web/dist")).
-func NewServer(eng *core.Engine, db *storage.DB, configPath string, staticFS fs.FS) *Server {
+func NewServer(eng *core.Engine, db *storage.DB, app config.App, configPath string, staticFS fs.FS) *Server {
 	if eng != nil {
 		if b := NewServerBridge(eng, db); b != nil {
 			llm_operator.SetBridge(b)
@@ -37,7 +40,14 @@ func NewServer(eng *core.Engine, db *storage.DB, configPath string, staticFS fs.
 			llm_operator.SetBridge(nil)
 		}
 	}
-	return &Server{Engine: eng, DB: db, ConfigPath: configPath, useFS: staticFS}
+	return &Server{
+		Engine:     eng,
+		DB:         db,
+		App:        app,
+		ConfigPath: configPath,
+		Executor:   runtimeflow.NewExecutor(eng, db, app, configPath),
+		useFS:      staticFS,
+	}
 }
 
 // Handler returns the root http.Handler. API and assets go to mux; other GET requests serve index (SPA fallback).
@@ -50,6 +60,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/interests", s.addInterest)
 	mux.HandleFunc("DELETE /api/interests/{id}", s.deleteInterest)
 	mux.HandleFunc("GET /api/core/ping", s.corePing)
+	mux.HandleFunc("GET /api/feature-flags/snapshot", s.requirePipelineAPIKey(s.featureFlagSnapshot))
 	mux.HandleFunc("GET /api/plugins/{id}/manifest", s.getPluginManifest)
 	mux.HandleFunc("POST /api/plugins/{id}/test", s.testPluginConfig)
 	mux.HandleFunc("GET /api/plugins", s.listPlugins)
@@ -503,34 +514,23 @@ func (s *Server) resolvePipelineConfigPath() string {
 }
 
 func (s *Server) initEngineFromEnv(w http.ResponseWriter) bool {
-	global := plugin.Config{
-		"api_key":   os.Getenv("OPENAI_API_KEY"),
-		"bot_token": os.Getenv("TELEGRAM_BOT_TOKEN"),
-		"chat_id":   os.Getenv("TELEGRAM_CHAT_ID"),
+	if s.Executor == nil {
+		http.Error(w, "runtime executor unavailable", http.StatusServiceUnavailable)
+		return false
 	}
-	if err := s.Engine.Init(global); err != nil {
+	if err := s.Executor.EnsureInitialized(); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return false
 	}
 	return true
 }
 
-func (s *Server) persistPipelineItems(items []*model.Item) {
-	if s.DB == nil || len(items) == 0 {
+func (s *Server) featureFlagSnapshot(w http.ResponseWriter, r *http.Request) {
+	if s.Executor == nil {
+		http.Error(w, "runtime executor unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	for _, it := range items {
-		var sid *int64
-		ts := it.Timestamp
-		if ts.IsZero() {
-			ts = time.Now()
-		}
-		itemID, _ := s.DB.SaveItem(sid, it.Title, it.URL, it.Content, it.Summary, ts, "")
-		if itemID > 0 && (it.Summary != "" || len(it.KeyPoints) > 0) {
-			kpJSON := storage.KeyPointsToJSON(it.KeyPoints)
-			_, _ = s.DB.SaveSummary(itemID, it.Summary, kpJSON)
-		}
-	}
+	jsonResponse(w, s.Executor.SnapshotForRequest(r))
 }
 
 // resolveDefaultPipelineForStatus returns JSON-friendly status payload (DB default graph or YAML stages).
@@ -578,40 +578,27 @@ func (s *Server) pipelineStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) pipelineRun(w http.ResponseWriter, r *http.Request) {
-	if !s.initEngineFromEnv(w) {
-		return
-	}
-	if s.DB != nil {
-		def, err := s.DB.GetDefaultPipelineDefinition()
-		if err == nil && def != nil {
-			g, perr := pipeline.ParseGraphJSON([]byte(def.GraphJSON))
-			if perr != nil {
-				http.Error(w, perr.Error(), http.StatusBadRequest)
-				return
-			}
-			items, err := s.Engine.RunGraph(g)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			s.persistPipelineItems(items)
-			jsonResponse(w, map[string]interface{}{"items_processed": len(items), "saved": s.DB != nil, "source": "db"})
-			return
-		}
-	}
-	configPath := s.resolvePipelineConfigPath()
-	pipe, err := pipeline.LoadFromFile(configPath)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	items, err := s.Engine.Run(pipe)
+	result, err := s.Executor.RunDefault(runtimeflow.RunInput{
+		Ctx:           r.Context(),
+		RequestPath:   r.URL.Path,
+		Source:        "api",
+		SubjectID:     runtimeflow.ResolveSubjectID(r),
+		RequestID:     r.Header.Get("X-Request-Id"),
+		RemoteAddr:    r.RemoteAddr,
+		FlagOverrides: runtimeflow.ResolveRequestOverrides(r),
+		PersistOutput: true,
+		UseDBDefault:  true,
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.persistPipelineItems(items)
-	jsonResponse(w, map[string]interface{}{"items_processed": len(items), "saved": s.DB != nil, "source": "file"})
+	jsonResponse(w, map[string]interface{}{
+		"items_processed": len(result.Items),
+		"saved":           result.Saved,
+		"source":          result.Source,
+		"flags":           result.Flags,
+	})
 }
 
 func (s *Server) listPipelines(w http.ResponseWriter, r *http.Request) {
@@ -763,9 +750,6 @@ func (s *Server) runPipelineByID(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "storage not configured", http.StatusServiceUnavailable)
 		return
 	}
-	if !s.initEngineFromEnv(w) {
-		return
-	}
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if id <= 0 {
 		http.Error(w, "invalid id", http.StatusBadRequest)
@@ -780,19 +764,26 @@ func (s *Server) runPipelineByID(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	g, err := pipeline.ParseGraphJSON([]byte(row.GraphJSON))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	items, err := s.Engine.RunGraphWithContext(r.Context(), id, g)
+	result, err := s.Executor.RunPipelineByID(runtimeflow.RunInput{
+		Ctx:           r.Context(),
+		RequestPath:   r.URL.Path,
+		Source:        "api",
+		SubjectID:     runtimeflow.ResolveSubjectID(r),
+		RequestID:     r.Header.Get("X-Request-Id"),
+		RemoteAddr:    r.RemoteAddr,
+		PipelineID:    id,
+		FlagOverrides: runtimeflow.ResolveRequestOverrides(r),
+		PersistOutput: true,
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.persistPipelineItems(items)
 	jsonResponse(w, map[string]interface{}{
-		"items_processed": len(items), "saved": s.DB != nil, "pipeline_id": id,
+		"items_processed": len(result.Items),
+		"saved":           result.Saved,
+		"pipeline_id":     id,
+		"flags":           result.Flags,
 	})
 }
 
@@ -815,12 +806,19 @@ func (s *Server) enqueuePipelineRun(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	jid, err := s.DB.EnqueueJob(id, "run", nil, 3)
+	payload := map[string]interface{}{
+		"__tracker_runtime": map[string]interface{}{
+			"request_path": r.URL.Path,
+			"subject_id":   runtimeflow.ResolveSubjectID(r),
+			"overrides":    runtimeflow.ResolveRequestOverrides(r),
+		},
+	}
+	jid, err := s.DB.EnqueueJob(id, "run", payload, 3)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	jsonResponse(w, map[string]int64{"job_id": jid})
+	jsonResponse(w, map[string]interface{}{"job_id": jid, "payload": payload})
 }
 
 func (s *Server) probePipeline(w http.ResponseWriter, r *http.Request) {
@@ -941,6 +939,11 @@ func (s *Server) rerunPipeline(w http.ResponseWriter, r *http.Request) {
 	}
 	if v := r.URL.Query().Get("to"); v != "" {
 		payload["time_to"] = v
+	}
+	payload["__tracker_runtime"] = map[string]interface{}{
+		"request_path": r.URL.Path,
+		"subject_id":   runtimeflow.ResolveSubjectID(r),
+		"overrides":    runtimeflow.ResolveRequestOverrides(r),
 	}
 	jid, err := s.DB.EnqueueJob(id, "rerun", payload, 5)
 	if err != nil {

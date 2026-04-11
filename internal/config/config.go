@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 
+	"Tracker/internal/featureflags"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,6 +19,10 @@ type App struct {
 	ServePort int `yaml:"serve_port"`
 	// Env can hold key-value overrides for pipeline (e.g. api_key). Keys can be UPPER_SNAKE and will be set as env for pipeline run.
 	Env map[string]string `yaml:"env"`
+	// Release defines deployment metadata for rollout / AB evaluation.
+	Release featureflags.ReleaseConfig `yaml:"release"`
+	// FeatureFlags holds codepath and rollout definitions.
+	FeatureFlags []featureflags.FlagConfig `yaml:"feature_flags"`
 }
 
 // File is the root structure of tracker config file (tracker.yaml or config.yaml).
@@ -34,6 +39,11 @@ func DefaultApp() App {
 		Schedule:     "",
 		ServePort:    8080,
 		Env:          nil,
+		Release: featureflags.ReleaseConfig{
+			Channel: "stable",
+			Ring:    "global",
+		},
+		FeatureFlags: featureflags.DefaultDefinitions(),
 	}
 }
 
@@ -56,8 +66,9 @@ func Load(path string) (App, string, error) {
 		data, err := os.ReadFile(path)
 		if err == nil {
 			var f File
-			if err := yaml.Unmarshal(data, &f); err == nil && (f.App.DBPath != "" || f.App.Schedule != "" || f.App.PipelinePath != "" || f.App.ServePort != 0 || len(f.App.Env) > 0) {
+			if err := yaml.Unmarshal(data, &f); err == nil && hasAppConfig(f.App) {
 				app = f.App
+				app.FeatureFlags = mergeFeatureFlags(featureflags.DefaultDefinitions(), app.FeatureFlags)
 				if app.PipelinePath == "" && f.Pipeline != "" {
 					app.PipelinePath = f.Pipeline
 				}
@@ -84,6 +95,18 @@ func Load(path string) (App, string, error) {
 			app.ServePort = p
 		}
 	}
+	if v := os.Getenv("TRACKER_RELEASE_CHANNEL"); v != "" {
+		app.Release.Channel = v
+	}
+	if v := os.Getenv("TRACKER_RELEASE_RING"); v != "" {
+		app.Release.Ring = v
+	}
+	if v := os.Getenv("TRACKER_RELEASE_VERSION"); v != "" {
+		app.Release.Version = v
+	}
+	if v := os.Getenv("TRACKER_RELEASE_INSTANCE"); v != "" {
+		app.Release.Instance = v
+	}
 	if app.PipelinePath == "" {
 		if _, err := os.Stat("config.yaml"); err == nil {
 			app.PipelinePath = "config.yaml"
@@ -92,6 +115,48 @@ func Load(path string) (App, string, error) {
 		}
 	}
 	return app, app.PipelinePath, nil
+}
+
+// GlobalPluginConfig returns the process-level plugin config for Engine.Init / InitRemote.
+func (a App) GlobalPluginConfig() map[string]interface{} {
+	global := map[string]interface{}{
+		"api_key":                    os.Getenv("OPENAI_API_KEY"),
+		"bot_token":                  os.Getenv("TELEGRAM_BOT_TOKEN"),
+		"chat_id":                    os.Getenv("TELEGRAM_CHAT_ID"),
+		"__tracker_release_channel":  a.Release.Channel,
+		"__tracker_release_ring":     a.Release.Ring,
+		"__tracker_release_version":  a.Release.Version,
+		"__tracker_release_instance": a.Release.Instance,
+	}
+	for k, v := range a.Env {
+		global[k] = v
+	}
+	return global
+}
+
+func hasAppConfig(app App) bool {
+	return app.DBPath != "" || app.Schedule != "" || app.PipelinePath != "" || app.ServePort != 0 || len(app.Env) > 0 || len(app.FeatureFlags) > 0 || app.Release.Channel != "" || app.Release.Ring != "" || app.Release.Version != "" || app.Release.Instance != ""
+}
+
+func mergeFeatureFlags(base []featureflags.FlagConfig, overrides []featureflags.FlagConfig) []featureflags.FlagConfig {
+	if len(overrides) == 0 {
+		return base
+	}
+	merged := make(map[string]featureflags.FlagConfig, len(base)+len(overrides))
+	for _, flag := range base {
+		merged[flag.Key] = flag
+	}
+	for _, flag := range overrides {
+		if flag.Key == "" {
+			continue
+		}
+		merged[flag.Key] = flag
+	}
+	out := make([]featureflags.FlagConfig, 0, len(merged))
+	for _, flag := range merged {
+		out = append(out, flag)
+	}
+	return out
 }
 
 func atoi(s string) int {

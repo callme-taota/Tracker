@@ -75,8 +75,8 @@ cp configs/default.yaml config.yaml
 **配置（全可配置）**
 
 - 应用配置：`tracker.yaml` 或 `config.yaml`，可用环境变量覆盖。
-- 配置项：`app.db_path`、`app.pipeline_path`、`app.schedule`（cron）、`app.serve_port`、`app.env` 等。
-- 环境变量：`TRACKER_DB_PATH`、`TRACKER_PIPELINE_PATH`、`TRACKER_SCHEDULE`、`TRACKER_PORT`、`TRACKER_CONFIG`。
+- 配置项：`app.db_path`、`app.pipeline_path`、`app.schedule`（cron）、`app.serve_port`、`app.env`、`app.release.*`、`app.feature_flags` 等。
+- 环境变量：`TRACKER_DB_PATH`、`TRACKER_PIPELINE_PATH`、`TRACKER_SCHEDULE`、`TRACKER_PORT`、`TRACKER_CONFIG`、`TRACKER_RELEASE_*`、`TRACKER_FLAG_OVERRIDES`。
 - 示例：`configs/tracker.example.yaml`、`configs/pipeline.example.yaml`。
 
 **管道定时执行**
@@ -126,6 +126,8 @@ docker compose up
 ```
 
 部署与多实例见 [docs/zh/DEPLOYMENT.md](docs/zh/DEPLOYMENT.md)。
+GitHub Actions 发版流程与产物说明见 [docs/zh/RELEASE.md](docs/zh/RELEASE.md)。
+功能开关规范见 [docs/zh/FEATURE_FLAGS.md](docs/zh/FEATURE_FLAGS.md)；灰度与回滚见 [docs/zh/ROLLOUT_AB.md](docs/zh/ROLLOUT_AB.md)；操作 SOP 见 [docs/zh/OPERATIONS_SOP.md](docs/zh/OPERATIONS_SOP.md)。
 
 **测试**
 

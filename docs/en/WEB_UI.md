@@ -37,6 +37,7 @@ Example: `rss` registers `RssPluginConfig` (multi-line feed URLs).
 - `GET /api/plugins/{id}/manifest`
 - `GET /api/core/ping`
 - `GET /api/plugins` includes `runtime` (`builtin` | `remote`) and `healthy` for remote plugins
+- `GET /api/feature-flags/snapshot` returns only `expose_to_web: true` flags; the shell may show release / experiment badges based on this snapshot
 - `POST /api/plugins/external/reload` — hot-reload external plugins from `TRACKER_EXTERNAL_PLUGINS_FILE` (requires `TRACKER_PLUGIN_ADMIN_KEY` + header `X-Tracker-Plugin-Admin-Key`)
 - `POST /api/operator/chat` — LLM operator (`llm_operator`); requires `TRACKER_OPERATOR_API_KEY` and header `X-Tracker-Operator-Key`
 

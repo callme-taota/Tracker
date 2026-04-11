@@ -16,6 +16,12 @@ docker compose up --build
 - 每个进程可设置 **`TRACKER_INSTANCE_ID`**（稳定字符串，例如 K8s Pod 名）。异步任务从 `pending` 被抢占为 `running` 时写入 `jobs.claimed_by`、`jobs.claimed_at`，便于排查执行实例。
 - **`ClaimNextPendingJob`** 使用「先选定 id，再 `UPDATE ... WHERE id=? AND status='pending'`」的方式，在同一数据库上并发抢任务时只有一个 `UPDATE` 会成功。
 
+## 发布元数据与功能开关
+
+- 建议统一设置：`TRACKER_RELEASE_CHANNEL`、`TRACKER_RELEASE_RING`、`TRACKER_RELEASE_VERSION`、`TRACKER_RELEASE_INSTANCE`。
+- 紧急切回旧逻辑时可使用：`TRACKER_FLAG_OVERRIDES`（例如 `runtime.executor_v2=legacy`）。
+- rollout 与回滚策略请同时参见 [ROLLOUT_AB.md](ROLLOUT_AB.md) 和 [OPERATIONS_SOP.md](OPERATIONS_SOP.md)。
+
 ## 连接池
 
 - SQLite：`internal/storage/sqlite.go` 在 `Open` 后设置 `SetMaxOpenConns`、`SetMaxIdleConns`（数值较保守；多进程写同一 SQLite 文件仍会受写锁限制）。

@@ -14,9 +14,9 @@ import (
 	"Tracker/internal/api"
 	"Tracker/internal/config"
 	"Tracker/internal/core"
+	"Tracker/internal/plugin"
 	"Tracker/internal/pluginhub"
 	"Tracker/internal/scheduler"
-	"Tracker/internal/plugin"
 	"Tracker/internal/storage"
 	"Tracker/internal/worker"
 
@@ -43,14 +43,7 @@ func serveCmd() *cobra.Command {
 			}
 			eng := core.New()
 			defer eng.Close()
-			global := plugin.Config{
-				"api_key":   os.Getenv("OPENAI_API_KEY"),
-				"bot_token": os.Getenv("TELEGRAM_BOT_TOKEN"),
-				"chat_id":   os.Getenv("TELEGRAM_CHAT_ID"),
-			}
-			for k, v := range app.Env {
-				global[k] = v
-			}
+			global := plugin.Config(app.GlobalPluginConfig())
 			if err := eng.Init(global); err != nil {
 				return fmt.Errorf("init engine: %w", err)
 			}
@@ -71,16 +64,16 @@ func serveCmd() *cobra.Command {
 			if d, err := os.Stat("web/dist"); err == nil && d.IsDir() {
 				staticFS = os.DirFS("web/dist")
 			}
-			srv := api.NewServer(eng, db, pipelinePath, staticFS)
+			srv := api.NewServer(eng, db, app, pipelinePath, staticFS)
 			if db != nil {
 				wctx, wcancel := context.WithCancel(context.Background())
 				defer wcancel()
-				go worker.Start(wctx, db, eng, 3*time.Second)
+				go worker.Start(wctx, db, srv.Executor, 3*time.Second)
 			}
 			addr := fmt.Sprintf(":%d", app.ServePort)
 			log.Printf("Tracker web UI: http://localhost%s", addr)
 			if app.Schedule != "" {
-				runner := &scheduler.Runner{PipelinePath: pipelinePath, DB: db, Env: app.Env}
+				runner := &scheduler.Runner{App: app, PipelinePath: pipelinePath, DB: db}
 				sched := scheduler.New(runner, app.Schedule)
 				sched.Start()
 				defer sched.Stop()

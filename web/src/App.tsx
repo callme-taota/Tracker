@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from '@/components/layout/app-shell'
+import { FeatureFlagProvider } from '@/lib/feature-flags'
 import Dashboard from '@/pages/Dashboard'
 import Pipeline from '@/pages/Pipeline'
 import Sources from '@/pages/Sources'
@@ -16,23 +17,25 @@ import Pipelines from '@/pages/Pipelines'
 
 export default function App() {
   return (
-    <Routes>
-      <Route element={<AppShell />}>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/pipelines" element={<Pipelines />} />
-        <Route path="/pipelines/:id" element={<PipelineEditor />} />
-        <Route path="/pipeline" element={<Pipeline />} />
-        <Route path="/sources" element={<Sources />} />
-        <Route path="/items" element={<Items />} />
-        <Route path="/summaries" element={<Summaries />} />
-        <Route path="/interests" element={<Interests />} />
-        <Route path="/plugins" element={<Plugins />} />
-        <Route path="/plugins/:pluginId" element={<PluginConfigPage />} />
-        <Route path="/plugin-packages" element={<PluginPackages />} />
-        <Route path="/plugin-packages/:id" element={<PluginWorkbench />} />
-        <Route path="/plugin-groups" element={<PluginGroups />} />
-        <Route path="*" element={<Navigate to="/pipelines" replace />} />
-      </Route>
-    </Routes>
+    <FeatureFlagProvider>
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/pipelines" element={<Pipelines />} />
+          <Route path="/pipelines/:id" element={<PipelineEditor />} />
+          <Route path="/pipeline" element={<Pipeline />} />
+          <Route path="/sources" element={<Sources />} />
+          <Route path="/items" element={<Items />} />
+          <Route path="/summaries" element={<Summaries />} />
+          <Route path="/interests" element={<Interests />} />
+          <Route path="/plugins" element={<Plugins />} />
+          <Route path="/plugins/:pluginId" element={<PluginConfigPage />} />
+          <Route path="/plugin-packages" element={<PluginPackages />} />
+          <Route path="/plugin-packages/:id" element={<PluginWorkbench />} />
+          <Route path="/plugin-groups" element={<PluginGroups />} />
+          <Route path="*" element={<Navigate to="/pipelines" replace />} />
+        </Route>
+      </Routes>
+    </FeatureFlagProvider>
   )
 }

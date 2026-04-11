@@ -36,6 +36,7 @@
 - `GET /api/jobs/{id}`
 - `GET /api/plugins/{id}/manifest`
 - `GET /api/core/ping`
+- `GET /api/feature-flags/snapshot`：仅返回允许暴露给前端的 flags，顶栏实验徽标等 UI 可基于此快照展示
 
 ## 本地开发前端
 

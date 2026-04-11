@@ -2,12 +2,10 @@ package cli
 
 import (
 	"fmt"
-	"os"
 
 	"Tracker/internal/config"
 	"Tracker/internal/core"
-	"Tracker/internal/plugin"
-	"Tracker/internal/pipeline"
+	"Tracker/internal/runtimeflow"
 	"github.com/spf13/cobra"
 )
 
@@ -21,28 +19,18 @@ func runCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			pipe, err := pipeline.LoadFromFile(pipelinePath)
-			if err != nil {
-				return fmt.Errorf("load pipeline: %w", err)
-			}
 			eng := core.New()
 			defer eng.Close()
-			global := plugin.Config{
-				"api_key":   os.Getenv("OPENAI_API_KEY"),
-				"bot_token": os.Getenv("TELEGRAM_BOT_TOKEN"),
-				"chat_id":   os.Getenv("TELEGRAM_CHAT_ID"),
-			}
-			for k, v := range app.Env {
-				global[k] = v
-			}
-			if err := eng.Init(global); err != nil {
-				return fmt.Errorf("init engine: %w", err)
-			}
-			items, err := eng.Run(pipe)
+			exec := runtimeflow.NewExecutor(eng, nil, app, pipelinePath)
+			result, err := exec.RunPipelineFile(runtimeflow.RunInput{
+				Source:      "cli",
+				RequestPath: "cli/run",
+				SubjectID:   app.Release.Instance,
+			})
 			if err != nil {
 				return fmt.Errorf("run pipeline: %w", err)
 			}
-			fmt.Printf("Pipeline finished. Items processed: %d\n", len(items))
+			fmt.Printf("Pipeline finished. Items processed: %d\n", len(result.Items))
 			return nil
 		},
 	}

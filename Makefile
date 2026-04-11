@@ -4,7 +4,7 @@ ifeq ($(shell uname),Darwin)
   LDFLAGS := -ldflags=-linkmode=external
 endif
 
-.PHONY: build test test-short fmt vet clean web-install web-build build-all docker-build
+.PHONY: build test test-short fmt vet clean web-install web-build build-all docker-build ci-go ci-web ci-docker
 
 build:
 	go build $(LDFLAGS) -o tracker ./cmd/tracker
@@ -26,7 +26,7 @@ clean:
 	rm -rf web/dist
 
 web-install:
-	cd web && npm install
+	cd web && if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 web-build:
 	cd web && npm run build
@@ -34,4 +34,15 @@ web-build:
 build-all: web-build build
 
 docker-build:
+	docker build -t tracker:local .
+
+ci-go:
+	go test $(LDFLAGS) ./...
+	go vet ./...
+
+ci-web:
+	cd web && npm ci
+	cd web && npm run build
+
+ci-docker:
 	docker build -t tracker:local .

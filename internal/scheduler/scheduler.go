@@ -2,62 +2,41 @@ package scheduler
 
 import (
 	"log"
-	"os"
 	"sync"
-	"time"
 
+	"Tracker/internal/config"
 	"Tracker/internal/core"
-	"Tracker/internal/pipeline"
-	"Tracker/internal/plugin"
+	"Tracker/internal/runtimeflow"
 	"Tracker/internal/storage"
 	"github.com/robfig/cron/v3"
 )
 
-// Runner runs a pipeline once (load config, init engine, run, optionally save to DB).
+// Runner runs the default pipeline through the shared runtime executor.
 type Runner struct {
+	App          config.App
 	PipelinePath string
 	DB           *storage.DB
-	Env          map[string]string
 }
 
-// Run executes the pipeline once. Env overrides are applied to os env for this run only (not persisted).
+// Run executes the default pipeline once.
 func (r *Runner) Run() (count int, err error) {
-	pipe, err := pipeline.LoadFromFile(r.PipelinePath)
-	if err != nil {
-		return 0, err
+	if r.PipelinePath == "" {
+		return 0, nil
 	}
 	eng := core.New()
 	defer eng.Close()
-	global := plugin.Config{
-		"api_key":   os.Getenv("OPENAI_API_KEY"),
-		"bot_token": os.Getenv("TELEGRAM_BOT_TOKEN"),
-		"chat_id":   os.Getenv("TELEGRAM_CHAT_ID"),
-	}
-	for k, v := range r.Env {
-		global[k] = v
-	}
-	if err := eng.Init(global); err != nil {
-		return 0, err
-	}
-	items, err := eng.Run(pipe)
+	exec := runtimeflow.NewExecutor(eng, r.DB, r.App, r.PipelinePath)
+	result, err := exec.RunDefault(runtimeflow.RunInput{
+		Source:        "scheduler",
+		RequestPath:   "scheduler/run",
+		SubjectID:     r.App.Release.Instance,
+		PersistOutput: true,
+		UseDBDefault:  true,
+	})
 	if err != nil {
 		return 0, err
 	}
-	if r.DB != nil && len(items) > 0 {
-		for _, it := range items {
-			var sid *int64
-			ts := it.Timestamp
-			if ts.IsZero() {
-				ts = time.Now()
-			}
-			itemID, _ := r.DB.SaveItem(sid, it.Title, it.URL, it.Content, it.Summary, ts, "")
-			if itemID > 0 && (it.Summary != "" || len(it.KeyPoints) > 0) {
-				kpJSON := storage.KeyPointsToJSON(it.KeyPoints)
-				_, _ = r.DB.SaveSummary(itemID, it.Summary, kpJSON)
-			}
-		}
-	}
-	return len(items), nil
+	return len(result.Items), nil
 }
 
 // Scheduler runs the pipeline on a cron schedule.

@@ -8,6 +8,11 @@ app:
   # cron 表达式：每 2 小时运行一次管道。留空则不自动运行。
   schedule: "0 */2 * * *"
   serve_port: 8080
+  release:
+    channel: stable
+    ring: global
+    version: "2026.04"
+    instance: "tracker-dev-1"
   # 可选：为管道运行提供密钥等（也可用系统环境变量）
   env:
     OPENAI_API_KEY: ""
@@ -15,3 +20,21 @@ app:
     TELEGRAM_CHAT_ID: ""
     FEISHU_WEBHOOK_URL: ""
     DISCORD_WEBHOOK_URL: ""
+  feature_flags:
+    - key: runtime.executor_v2
+      description: 统一 API / worker / scheduler / CLI 的运行时执行链
+      default_variant: legacy
+      variants:
+        - name: legacy
+          weight: 100
+        - name: unified
+          weight: 0
+    - key: web.runtime_experiments
+      description: 在 Web 顶栏显示实验快照与发布通道
+      default_variant: off
+      expose_to_web: true
+      variants:
+        - name: off
+          weight: 100
+        - name: on
+          weight: 0

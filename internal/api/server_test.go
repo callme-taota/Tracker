@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"Tracker/internal/api"
+	"Tracker/internal/config"
 	"Tracker/internal/core"
 	"Tracker/internal/plugin"
 	"Tracker/internal/storage"
@@ -47,7 +48,7 @@ func testServer(t *testing.T) *api.Server {
 	if err := eng.Init(plugin.Config{}); err != nil {
 		t.Fatal(err)
 	}
-	return api.NewServer(eng, nil, defaultConfigPath(t), nil)
+	return api.NewServer(eng, nil, config.DefaultApp(), defaultConfigPath(t), nil)
 }
 
 func TestTestPluginConfig_UnsupportedPluginReturns501(t *testing.T) {
@@ -180,6 +181,39 @@ func TestPluginQualityReport_IncludesGovernanceDetails(t *testing.T) {
 	}
 }
 
+func TestFeatureFlagSnapshot_ExposesWebFlagsOnly(t *testing.T) {
+	t.Setenv("TRACKER_API_KEY", "flag-key")
+	srv := testServer(t)
+	h := srv.Handler()
+	req := httptest.NewRequest(http.MethodGet, "/api/feature-flags/snapshot", nil)
+	req.Header.Set("X-Tracker-Api-Key", "flag-key")
+	req.Header.Set("X-Tracker-Subject", "user-123")
+	req.Header.Set("X-Tracker-Experiment", "web.runtime_experiments=on")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		SubjectID string `json:"subject_id"`
+		Flags     map[string]struct {
+			Variant string `json:"variant"`
+		} `json:"flags"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.SubjectID != "user-123" {
+		t.Fatalf("subject_id got %q", out.SubjectID)
+	}
+	if out.Flags["web.runtime_experiments"].Variant != "on" {
+		t.Fatalf("unexpected web.runtime_experiments: %#v", out.Flags)
+	}
+	if _, ok := out.Flags["runtime.executor_v2"]; ok {
+		t.Fatalf("runtime-only flag should not be exposed: %#v", out.Flags)
+	}
+}
+
 func TestStats_StorageDisabled(t *testing.T) {
 	srv := testServer(t)
 	h := srv.Handler()
@@ -208,7 +242,7 @@ func TestStats_StorageEnabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	srv := api.NewServer(eng, db, defaultConfigPath(t), nil)
+	srv := api.NewServer(eng, db, config.DefaultApp(), defaultConfigPath(t), nil)
 	h := srv.Handler()
 	req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
 	rr := httptest.NewRecorder()
@@ -237,7 +271,7 @@ func TestOperatorChat_NoEnvKey503(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	srv := api.NewServer(eng, db, defaultConfigPath(t), nil)
+	srv := api.NewServer(eng, db, config.DefaultApp(), defaultConfigPath(t), nil)
 	h := srv.Handler()
 	req := httptest.NewRequest(http.MethodPost, "/api/operator/chat", strings.NewReader(`{"messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -256,7 +290,7 @@ func TestReloadExternalPlugins_NoAdminKey503(t *testing.T) {
 	if err := eng.Init(plugin.Config{}); err != nil {
 		t.Fatal(err)
 	}
-	srv := api.NewServer(eng, nil, defaultConfigPath(t), nil)
+	srv := api.NewServer(eng, nil, config.DefaultApp(), defaultConfigPath(t), nil)
 	h := srv.Handler()
 	req := httptest.NewRequest(http.MethodPost, "/api/plugins/external/reload", nil)
 	rr := httptest.NewRecorder()
@@ -278,7 +312,7 @@ func TestOperatorChat_Unauthorized401(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	srv := api.NewServer(eng, db, defaultConfigPath(t), nil)
+	srv := api.NewServer(eng, db, config.DefaultApp(), defaultConfigPath(t), nil)
 	h := srv.Handler()
 	req := httptest.NewRequest(http.MethodPost, "/api/operator/chat", strings.NewReader(`{"messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Content-Type", "application/json")

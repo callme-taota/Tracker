@@ -156,8 +156,8 @@ Optional environment variables (or set in `config.yaml`):
 **Configuration (fully configurable)**
 
 - App config: `tracker.yaml` or `config.yaml`, with optional environment overrides.
-- Keys: `app.db_path`, `app.pipeline_path`, `app.schedule` (cron), `app.serve_port`, `app.env` (secrets, etc.).
-- Environment: `TRACKER_DB_PATH`, `TRACKER_PIPELINE_PATH`, `TRACKER_SCHEDULE`, `TRACKER_PORT`, `TRACKER_CONFIG`.
+- Keys: `app.db_path`, `app.pipeline_path`, `app.schedule` (cron), `app.serve_port`, `app.env`, `app.release.*`, `app.feature_flags`.
+- Environment: `TRACKER_DB_PATH`, `TRACKER_PIPELINE_PATH`, `TRACKER_SCHEDULE`, `TRACKER_PORT`, `TRACKER_CONFIG`, `TRACKER_RELEASE_*`, `TRACKER_FLAG_OVERRIDES`.
 - Examples: `configs/tracker.example.yaml`, `configs/pipeline.example.yaml`.
 
 **Scheduled pipeline runs**
@@ -207,6 +207,8 @@ docker compose up
 ```
 
 Deployment and multi-instance notes: [docs/en/DEPLOYMENT.md](docs/en/DEPLOYMENT.md).
+GitHub Actions release flow and artifact contract: [docs/en/RELEASE.md](docs/en/RELEASE.md).
+Feature flag policy: [docs/en/FEATURE_FLAGS.md](docs/en/FEATURE_FLAGS.md). Rollout and rollback: [docs/en/ROLLOUT_AB.md](docs/en/ROLLOUT_AB.md). SOP: [docs/en/OPERATIONS_SOP.md](docs/en/OPERATIONS_SOP.md).
 
 **Tests**
 
