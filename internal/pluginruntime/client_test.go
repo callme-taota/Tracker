@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestClientHandshakeAndProcess(t *testing.T) {
@@ -14,6 +15,7 @@ func TestClientHandshakeAndProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = ln.Close() })
 	addr := ln.Addr().String()
 	done := make(chan struct{})
 	go func() {
@@ -32,7 +34,7 @@ func TestClientHandshakeAndProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cli.Close()
+	defer closeClientAndWait(t, cli, done)
 
 	hs, err := cli.Handshake(context.Background())
 	if err != nil {
@@ -62,7 +64,6 @@ func TestClientHandshakeAndProcess(t *testing.T) {
 	if out["title"] != "HI" {
 		t.Fatalf("got %v", out["title"])
 	}
-	<-done
 }
 
 func TestClientHandshake_RemoteError(t *testing.T) {
@@ -70,6 +71,7 @@ func TestClientHandshake_RemoteError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = ln.Close() })
 	addr := ln.Addr().String()
 	done := make(chan struct{})
 	go func() {
@@ -98,7 +100,7 @@ func TestClientHandshake_RemoteError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cli.Close()
+	defer closeClientAndWait(t, cli, done)
 
 	_, err = cli.Handshake(context.Background())
 	if err == nil {
@@ -107,7 +109,18 @@ func TestClientHandshake_RemoteError(t *testing.T) {
 	if !strings.Contains(err.Error(), "intentional failure") {
 		t.Fatalf("got %v", err)
 	}
-	<-done
+}
+
+func closeClientAndWait(t *testing.T, cli *Client, done <-chan struct{}) {
+	t.Helper()
+	if cli != nil {
+		_ = cli.Close()
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("test plugin server did not exit")
+	}
 }
 
 func servePluginConn(t *testing.T, c net.Conn) {
